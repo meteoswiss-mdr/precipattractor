@@ -7,6 +7,11 @@ import sys
 
 import time_tools_attractor as ti
 
+import getpass
+usrName = getpass.getuser()
+
+outDir='/users/' + usrName + '/precipattractor/shscripts'
+
 # Parse input arguments
 parser = argparse.ArgumentParser(description='Create time periods to pass to the bash script for parallel radar data processing.')
 parser.add_argument('-start', default='201601010000', type=str,help='Starting date YYYYMMDDHHmmSS.')
@@ -77,6 +82,6 @@ if (args.days != -1) & (args.n == -1):
 
 print("Number of periods: ", timeStampsArray.shape[0])
 ##### Save file with time stamps of periods
-fileName = '/users/lforesti/pyscripts/timePeriods.txt'
+fileName = outDir + '/timePeriods.txt'
 np.savetxt(fileName, timeStampsArray, fmt='%s', delimiter='\t', newline='\n')
 print(fileName, ' saved.')
