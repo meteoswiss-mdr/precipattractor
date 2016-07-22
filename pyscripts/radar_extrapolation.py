@@ -13,14 +13,23 @@ import getpass
 import os
 import time
 
+# OpenCV
+import cv2
+
 # Precip Attractor libraries
 import time_tools_attractor as ti
 import io_tools_attractor as io
 import data_tools_attractor as dt
 
-# radar extrapolation libraries
+# optical flow libraries
 import optical_flow as of
+
+# advection libraries
 import adv2d
+print(adv2d.__doc__)
+import maple_ree
+print(maple_ree.__doc__)
+
 
 ####################################
 ###### RADAR EXTRAPOLATION IN PYTHON
@@ -44,14 +53,15 @@ outBaseDir = '/store/msrad/radar/precip_attractor_' + usrName + '/data/'
 ######## Parse arguments from command line
 parser = argparse.ArgumentParser(description='')
 parser.add_argument('-start', default='201505151600', type=str,help='Start date of forecast YYYYMMDDHHmmSS.')
-parser.add_argument('-leadtime', default=30, type=int,help='')
-parser.add_argument('-stack', default=30, type=int,help='')
+parser.add_argument('-leadtime', default=60, type=int,help='')
+parser.add_argument('-stack', default=15, type=int,help='')
 parser.add_argument('-product', default='AQC', type=str,help='Which radar rainfall product to use (AQC, CPC, etc).')
-parser.add_argument('-frameRate', default=0.3, type=float,help='')
-
+parser.add_argument('-frameRate', default=0.5, type=float,help='')
+parser.add_argument('-adv', default='maple', type=str,help='')
 
 args = parser.parse_args()
 
+advectionScheme = args.adv
 frameRate = args.frameRate
 product = args.product
 leadtime = args.leadtime
@@ -219,16 +229,16 @@ for i in range(nStacks,-1,-1):
                 # (1a) features to track by threshold (cells)
                 maxCorners = 10
                 p0a, nCorners = of.threshold_features_to_track(prvs, maxCorners, blockSize = 20)
-
+                
                 # (1b) Shi-Tomasi good features to track
                 maxCorners = 200
                 p0b, nCorners = of.ShiTomasi_features_to_track(prvs, maxCorners, qualityLevel=0.1, minDistance=10, blockSize=3)   
                 
                 # merge both
                 p0 = np.vstack((p0a,p0b))
-                
+
                 # (2) Lucas-Kande tracking
-                x, y, u, v, err = of.LucasKanade_features_tracking(prvs, next, p0, winSize=(15,15), maxLevel=3)
+                x, y, u, v, err = of.LucasKanade_features_tracking(prvs, next, p0, winSize=(15,15), maxLevel=0)
                 
                 # (3) stack vectors within time window
                 xStack.insert(0,x)
@@ -251,12 +261,11 @@ zplot = np.rollaxis(zplot,-1)
 
 # (1) decluster sparse motion vectors
 if (nStacks > 1):
-    x, y, u, v = of.declustering(x, y, u, v, R = 15, minN=3)
+    x, y, u, v = of.declustering(x, y, u, v, R = 15, minN = 3)
 
 # (2) kernel interpolation
-
 xgrid, ygrid, U, V = of.interpolate_sparse_vectors_kernel(x, y, u, v, \
-                        domainSize, b = 40)
+                        domainSize, b = 30)
     
 toc = time.clock()
 print('OF time: ',str(toc-tic),' seconds.')    
@@ -268,30 +277,76 @@ print('OF time: ',str(toc-tic),' seconds.')
 xs, ys, Us, Vs = of.reduce_field_density_for_plotting(xgrid, ygrid, U, V, 20)
 # plt.quiver(xs,ys,Us,-Vs)
 # plt.show()
-    
+
 ########### Advect most recent rainrate field using the computed optical flow
-nt = np.round(leadtime/timeAccumMin).astype(int) + nStacks + 1
-tic = time.clock()
+
+# number of leadtimes
+net = np.round(leadtime/timeAccumMin).astype(int)
+# leadtimes + number of observations
+nt = net + nStacks + 1
+
+# MAPLE advection scheme
+if (advectionScheme=='maple'):
+    # MAPLE computes all leadtimes in one run
+    print("Running",str(net),"leadtimes with MAPLE's advection scheme ...")
+    
+    # resize motion fields by half
+    Ures = cv2.resize(U, (0,0), fx=0.5, fy=0.5) 
+    Vres = cv2.resize(V, (0,0), fx=0.5, fy=0.5) 
+
+    # extract last radar image to advect
+    z = zplot[nStacks,:,:]
+    z[np.isnan(z)]=0
+    
+    # call routine
+    tic = time.clock()
+    zmaple = maple_ree.ree_epol_slio(z, Vres, Ures, net)
+    toc = time.clock()
+    print('AD time: ',str((toc-tic)/net),' seconds per time-step.')
+
+# Michael's advection scheme
+if (advectionScheme=='ethz'):
+    print("Running",str(net),"leadtimes with Michael's advection scheme ...")
+    
+    # extract last radar image to advect
+    z = zplot[nStacks,:,:]
+    z[np.isnan(z)]=0
+    
+    tic = time.clock()
+    # loop for n leadtimes
+    ztmp = np.zeros((domainSize,domainSize,net+1))
+    ztmp[:,:,0] = z
+    for nt in range(net):
+        ztmp[:,:,nt+1] = adv2d.advxy(V,U,ztmp[:,:,nt],0)
+        ztmp[ztmp<0.001]=0
+    zethz = ztmp[:,:,1:nt+1]    
+    toc = time.clock()
+    print('AD time: ',str((toc-tic)/net),' seconds per time-step.')
+    
+# animation
 for it in range(nt):
-    if (it > nStacks): # advection mode
-        # initial state
-        if (it == nStacks+1):
-            timeLocal = t[it-1]
-            z = zplot[it-1,:,:] 
-            # z = np.zeros((domainSize,domainSize))
-            # z[210:310,210:310] = np.ones((100,100))
-                           
-        z[np.isnan(z)]=0
-        z = adv2d.advxy(V,U,z,0)
+    plt.clf() 
+    
+    if (it <= nStacks): # observation mode
+        timeLocal = t[it]
+        z = zplot[it,:,:]
+        z[z<=0]=np.nan
+        titleStr = timeLocal.strftime("%Y.%m.%d %H:%M") + ', ' + product + ' rainfall field' 
+        if (it>0):
+            x = xStack[it-1]
+            y = yStack[it-1]
+            u = uStack[it-1]
+            v = vStack[it-1]
+            plt.quiver(x,y,u,v,angles = 'xy', scale_units='xy', color='darkred')
+    
+    else: # extrapolation mode
+        if (advectionScheme=='maple'):
+            z = np.squeeze(zmaple[:,:,it - nStacks - 1])
+        elif (advectionScheme=='ethz'):
+            z = np.squeeze(zethz[:,:,it - nStacks - 1])
         z[z<=0]=np.nan
         titleStr = timeLocal.strftime("%Y.%m.%d %H:%M") + ' + ' + str((it-nStacks)*5) + ' min, ' + product + ' rainfall field' 
 
-    else: # observation mode
-        timeLocal = t[it]
-        z = zplot[it,:,:]
-        titleStr = timeLocal.strftime("%Y.%m.%d %H:%M") + ', ' + product + ' rainfall field' 
-    
-    plt.clf()  
     rainIm = plt.imshow(z, cmap=cmap, norm=norm, interpolation='nearest')
     cbar = plt.colorbar(rainIm, ticks=clevs, spacing='uniform', norm=norm, extend='max', fraction=0.03)
     cbar.set_ticklabels(clevsStr, update_ticks=True)
@@ -302,5 +357,3 @@ for it in range(nt):
     # plt.title('{:.2f}%'.format(asd))
     plt.pause(frameRate)
     
-toc = time.clock()
-print('AD time: ',str(toc-tic),' seconds.')       
