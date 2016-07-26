@@ -19,6 +19,8 @@ c     (Code optimized for stationary motion assumption) c
 c     Version 29 June 2001                                            c
 c     c
 ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+c compile code as python module:
+c f2py -c -m maple_ree maple_ree.F
 
 Cf2py intent(in) r0
 Cf2py intent(out) re
@@ -36,7 +38,8 @@ c     default parameters
       integer mag
       parameter(mag=10)
       real dx,dy,dte
-      parameter(dte=300.,dx=1000.,dy=1000.)
+      parameter(dte=1.,dx=1.,dy=1.)
+c     parameter(dte=300.,dx=1000.,dy=1000.)
 
 c     arguments
       integer net,nx,ny,nvx,nvy
