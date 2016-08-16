@@ -29,7 +29,8 @@ c cu(i-1,j)     zz(i,j)       cu(i,j)
 c :                                 :
 c :                                 :
 c .............cv(i,j-1).............
-c
+c compile code as python module:
+c f2py -c -m adv2d adv2d.f
 
 Cf2py intent(in,out) z
 Cf2py intent(in) v

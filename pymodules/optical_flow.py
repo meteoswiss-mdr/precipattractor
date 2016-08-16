@@ -6,9 +6,13 @@ import numpy as np
 import sys
 
 import cv2
+
 from scipy.spatial.distance import cdist
 from scipy.interpolate import griddata
+import scipy.ndimage.filters as filters
+import scipy.ndimage as ndimage
 
+import matplotlib.pyplot as plt
 ###############################################
 ############################################### 
     
@@ -27,80 +31,53 @@ def ShiTomasi_features_to_track(image, maxCorners=100, qualityLevel=0.1, minDist
     
     return(p0, nCorners)
       
-def threshold_features_to_track(image, maxCorners, blockSize = 10):
+def threshold_features_to_track(image, maxCorners, minThr = 0.08, blockSize = 30):
     '''
-    Function to
+    Local maxima detection
     '''
     
-    # extract wet pixels
-    idxWetPixels = image > 0.08
+    image = image.astype(float)
+    idxWetPixels = image > minThr
     wetPixels = image[idxWetPixels]
     nWetPixels = np.sum(idxWetPixels)
-    
-     # get thr corresponding to specified number of points
-    q = (1 - maxCorners/nWetPixels)*100
+    q = (maxCorners/nWetPixels)*100
     thr = np.floor(np.percentile(wetPixels,q))
     
-    n = 0
+    # normalize 0-1
+    thr = thr*1.0/image.max()
+    image *= 1.0/image.max()
+    
+
+    nCorners = maxCorners+1
     iter = 0
-    miter = 200
-    while (n < maxCorners) & (iter < miter):
+    miter = 500
+    while (nCorners > maxCorners) & (iter < miter):
+        iter = iter+1
+        imageWet = image.copy()
+        imageWet[imageWet <= thr] = 0
+        image_max = filters.maximum_filter(imageWet,size=blockSize)
+        maxima = (imageWet == image_max)
+        image_min = filters.minimum_filter(imageWet,size=blockSize)
+        notminima = (imageWet != image_min)
+        maxima = maxima*notminima
+        labeled, num_objects = ndimage.label(maxima)
+        slices = ndimage.find_objects(labeled)
+        x, y = [], []
+        for dy,dx in slices:
+            x_center = (dx.start + dx.stop - 1)/2
+            x.append(x_center)
+            y_center = (dy.start + dy.stop - 1)/2    
+            y.append(y_center)
+        nCorners = len(x)
+        thr=thr*1.05
 
-        # extract all pixels >= thr
-        idxPixels = image >= thr
-        nPixels = np.sum(idxPixels)
-        p0 = idxPixels.nonzero()
-        y = p0[0]
-        x = p0[1]
-        z = image[idxPixels]
-        x = x.reshape(x.size,1)
-        y = y.reshape(y.size,1)
-        z = z.reshape(z.size,1)
-
-        # apply min distance   
-        xT = x/blockSize
-        yT = y/blockSize
-           
-        # round coordinates to nearest integer 
-        xT = np.floor(xT)
-        yT = np.floor(yT)
-
-        # find unique combinations of coordinates
-        xy = np.hstack((xT,yT))
-        unique_xy = unique_rows(xy)
-        n = unique_xy.shape[0]
-        
-        if (n >= maxCorners)|(iter == miter - 1):
-            # now loop through these unique values and average vectors which belong to the same unit
-            xN=[]; yN=[]; zN = []
-            for i in range(0,unique_xy.shape[0]):
-                idx = (xT==unique_xy[i,0])&(yT==unique_xy[i,1])
-                idxMax = idx&(z==np.max(z[idx]))
-                xtemp = x[idxMax]; ytemp = y[idxMax]; ztemp = z[idxMax]
-                xN.append(np.round(np.median(xtemp))); yN.append(np.round(np.median(ytemp))); zN.append(np.median(ztemp))
-
-            # extract declustered values
-            x = np.array(xN); y = np.array(yN); z = np.array(zN)
-
-        else:
-            # adjust threshold
-            thr = thr*0.999
-        iter = iter + 1
-        
-    if (n > maxCorners):
-        # keep largest values to match specified number of points
-        idx = z.argsort()[-maxCorners:][::-1]
-        x = x[idx]
-        y = y[idx]
-        
-    nCorners = x.size
     p0 = np.vstack((x,y)).T
     p0 = p0.reshape((nCorners,1,2))
     p0 = np.float32(p0)
-    
+
     return(p0, nCorners)
     
-
+    
 def LucasKanade_features_tracking(prvs, next, p0, winSize=(35,35), maxLevel=10):
     '''
     Function to call the Lucas-Kanade features tracking algorithm
@@ -237,9 +214,12 @@ def interpolate_sparse_vectors_kernel(x, y, u, v, domainSize, b = []):
     u = u.reshape(u.size,1)
     v = v.reshape(v.size,1)
     
+    if len(domainSize)==1:
+        domainSize=[domainSize,domainSize]
+        
     # generate the grid
-    xgrid = np.arange(domainSize)
-    ygrid = np.arange(domainSize)
+    xgrid = np.arange(domainSize[1])
+    ygrid = np.arange(domainSize[0])
     X, Y = np.meshgrid(xgrid,ygrid)
     grid = np.column_stack((X.flatten(),Y.flatten()))
     
@@ -264,33 +244,52 @@ def interpolate_sparse_vectors_kernel(x, y, u, v, domainSize, b = []):
     V = np.sum(weights*v,axis=0)/np.sum(weights,axis=0)
     
     # reshape back to domain size
-    U = U.reshape(domainSize,domainSize)
-    V = V.reshape(domainSize,domainSize)
+    U = U.reshape(domainSize[0],domainSize[1])
+    V = V.reshape(domainSize[0],domainSize[1])
     
     return(xgrid, ygrid, U, V)
     
     
-def interpolate_sparse_vectors_linear(x, y, u, v, X, Y):
+def interpolate_sparse_vectors_linear(x, y, u, v, domainSize):
     '''
     Linear interpolation to obtain a dense field of motion vectors.
     Extrapolation is performed using a nearest-neighbours approach.
     '''
     
+    if len(domainSize)==1:
+        domainSize=[domainSize,domainSize]
+    
+    # make sure these are vertical arrays
+    x = x.reshape(x.size,1)
+    y = y.reshape(y.size,1)
+    u = u.reshape(u.size,1)
+    v = v.reshape(v.size,1)
+    
+    # generate the grid
+    xgrid = np.arange(domainSize[1])
+    ygrid = np.arange(domainSize[0])
+    X, Y = np.meshgrid(xgrid,ygrid)
+   
     # first linear interpolation
-    grid = (X[:],Y[:])
-    points = (x,y)
+    grid = np.column_stack((X.flatten(),Y.flatten()))
+    points = np.column_stack((x,y))
     method = 'linear'
     U = griddata(points, u[:], grid, method = method)
     V = griddata(points, v[:], grid, method = method)
-
+    # reshape back to domain size
+    U = U.reshape(domainSize[0],domainSize[1])
+    V = V.reshape(domainSize[0],domainSize[1])
+    
     # then extrapolation by nearest neighbour
     idWithin = np.isfinite(U)
-    points = (X[idWithin],Y[idWithin])
+    points = np.column_stack((X[idWithin].flatten(),Y[idWithin].flatten()))
     method = 'nearest'
     U = griddata(points, U[idWithin], grid, method = method)
-    V = griddata(points, V[idWithin], grid, method = method)    
+    V = griddata(points, V[idWithin], grid, method = method) 
+    U = U.reshape(domainSize[0],domainSize[1])
+    V = V.reshape(domainSize[0],domainSize[1])
     
-    return(U, V)
+    return(xgrid, ygrid, U, V)
     
     
 def reduce_field_density_for_plotting(x, y, u, v, gridSpacing):
