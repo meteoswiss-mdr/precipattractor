@@ -13,7 +13,7 @@ import io_tools_attractor as io
 #######################
 product = 'CPC'
 inBaseDir = '/scratch/lforesti/data/' # directory to read from
-plotSpectrum = '1d'
+plotSpectrum = '2d'
 outBaseDir = '/users/lforesti/results/'
 framesPerSecond = 3
 timeAccumMin = 5

@@ -289,8 +289,8 @@ def get_files_period(timeStart, timeEnd, inBaseDir, fileNameExpr, tempResMin = 5
     timeLocal = timeStart
     fileList = []
     while timeLocal <= timeEnd:
-        year, yearStr, julianDay, julianDayStr = parse_datetime(timeLocal)
-        timeLocalStr = datetime2juliantimestring(timeLocal)
+        year, yearStr, julianDay, julianDayStr = ti.parse_datetime(timeLocal)
+        timeLocalStr = ti.datetime2juliantimestring(timeLocal)
         # Get directory
         subDir = str(year) + '/' + yearStr + julianDayStr + '/'
         imgDir = inBaseDir + subDir

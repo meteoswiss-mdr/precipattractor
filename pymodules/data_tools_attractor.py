@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 
 import sys
+import math 
 
 import numpy as np
 import pandas as pd
@@ -247,3 +248,91 @@ def smooth_extrapolate_velocity_field(u, v, prvs, next, sigma):
     
     flow = np.dstack((ugrid,vgrid))
     print(flow.shape)
+    
+def generate_data():
+    data = np.zeros((200, 200), dtype=np.float)
+    cov = np.array([[200, 100], [100, 200]])
+    ij = np.random.multivariate_normal((100,100), cov, int(1e5))
+    for i,j in ij:
+        data[int(i), int(j)] += 1
+    return data 
+
+def raw_moment(data, iord, jord):
+    nrows, ncols = data.shape
+    y, x = np.mgrid[:nrows, :ncols]
+    data = data * x**iord * y**jord
+    return data.sum()
+
+def intertial_axis(data):
+    """Calculate the x-mean, y-mean, and cov matrix of an image."""
+    data_sum = data.sum()
+    m10 = raw_moment(data, 1, 0)
+    m01 = raw_moment(data, 0, 1)
+    x_bar = m10 / data_sum
+    y_bar = m01 / data_sum
+    u11 = (raw_moment(data, 1, 1) - x_bar * m01) / data_sum
+    u20 = (raw_moment(data, 2, 0) - x_bar * m10) / data_sum
+    u02 = (raw_moment(data, 0, 2) - y_bar * m01) / data_sum
+    cov = np.array([[u20, u11], [u11, u02]])
+    return x_bar, y_bar, cov
+
+def make_lines(eigvals, eigvecs, mean, i):
+        """Make lines a length of 2 stddev."""
+        std = np.sqrt(eigvals[i])
+        vec = 2 * std * eigvecs[:,i] / np.hypot(*eigvecs[:,i])
+        x, y = np.vstack((mean-vec, mean, mean+vec)).T
+        return x, y
+        
+def decompose_cov_plot_bars(x_bar, y_bar, cov, ax):
+    """Plot bars with a length of 2 stddev along the principal axes."""
+    mean = np.array([x_bar, y_bar])
+    eigvals, eigvecs = np.linalg.eigh(cov)
+    ax.plot(*make_lines(eigvals, eigvecs, mean, 0), marker='o', color='white')
+    ax.plot(*make_lines(eigvals, eigvecs, mean, -1), marker='o', color='white')
+    ax.axis('image')
+    return(eigvals,eigvecs)
+
+def plot_bars(x_bar, y_bar, eigvals, eigvecs, ax):
+    """Plot bars with a length of 2 stddev along the principal axes."""
+    mean = np.array([x_bar, y_bar])
+    ax.plot(*make_lines(eigvals, eigvecs, mean, 0), marker='o', color='white')
+    ax.plot(*make_lines(eigvals, eigvecs, mean, -1), marker='o', color='white')
+    ax.axis('image')
+
+def cart2pol(x, y):
+    rho = np.sqrt(x**2 + y**2)
+    phi = np.arctan2(y, x)
+    return(rho, phi)
+    
+def pol2cart(rho, phi):
+    x = rho * np.cos(phi)
+    y = rho * np.sin(phi)
+    return(x, y)
+
+def compute_fft_anisotropy(psd2d, fftSizeSub = 0):
+    fftSize = psd2d.shape
+    
+    if ((fftSize[0] % 2) != 0) or ((fftSize[1] % 2) != 0):
+        print("Error in compute_fft_anisotropy: please provide an even sized 2d FFT spectrum.")
+        sys.exit(1)
+    fftMiddleX = fftSize[1]/2
+    fftMiddleY = fftSize[0]/2
+
+    # Select subset of spectrum
+    psd2dsub = psd2d[fftMiddleY-fftSizeSub:fftMiddleY+fftSizeSub,fftMiddleX-fftSizeSub:fftMiddleX+fftSizeSub]
+
+    # Rotate FFT spectrum by 90 degrees
+    psd2dsub = np.rot90(psd2dsub)
+    
+    # Find inertial axis and covariance matrix
+    xbar, ybar, cov = intertial_axis(psd2dsub)
+
+    # Decompose covariance matrix
+    eigvals, eigvecs = np.linalg.eigh(cov)
+    
+    # Compute eccentricity and orientation of anisotropy
+    idxMax = np.argmin(eigvals)
+    eccentricity = np.max(np.sqrt(eigvals))/np.min(np.sqrt(eigvals))
+    orientation = np.degrees(math.atan(eigvecs[0,idxMax]/eigvecs[1,idxMax]))
+    
+    return psd2dsub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs

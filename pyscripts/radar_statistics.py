@@ -15,6 +15,7 @@ import matplotlib.colors as colors
 import matplotlib.image as mpimg
 import pylab
 
+import math
 import numpy as np
 import csv
 import shutil
@@ -24,6 +25,10 @@ import warnings
 import cv2
 
 from scipy import fftpack,stats
+import scipy.ndimage as ndimage
+
+import getpass
+usrName = getpass.getuser()
 
 #### Import personal libraries
 import time_tools_attractor as ti
@@ -43,7 +48,6 @@ fmt3 = "%.3f"
 fmt5 = "%.5f"
 
 ########SET DEFAULT ARGUMENTS##########
-usrName = 'lforesti'
 timeAccumMin = 5
 resKm = 1 # To compute FFT frequency
 inBaseDir = '/scratch/' + usrName + '/data/' # directory to read from
@@ -60,7 +64,7 @@ parser.add_argument('-end', default='201601310600', type=str,help='Ending date Y
 parser.add_argument('-product', default='AQC', type=str,help='Which radar rainfall product to use (AQC, CPC, etc).')
 parser.add_argument('-flow', default=0, type=int,help='Whether to compute the optical flow.')
 parser.add_argument('-plot', default=0, type=int,help='Whether to plot the rainfall fields and the power spectra.')
-parser.add_argument('-plt', default='1d', type=str,help='Type of plot on the side of the precipitation field (1d, 2d, 1dnoise,2dnoise or noise field).')
+parser.add_argument('-plt', default='1d', type=str,help='Type of plot on the side of the precipitation field (1d, 2d, 1dnoise, 2dnoise or noise field).')
 parser.add_argument('-wols', default=0, type=int,help='Whether to use the weighted ordinary leas squares or not in the fitting of the power spectrum.')
 parser.add_argument('-minR', default=0.08, type=float,help='Minimum rainfall rate for computation of WAR and various statistics.')
 parser.add_argument('-format', default="netcdf", type=str,help='File format for output statistics (netcdf or csv).')
@@ -133,7 +137,8 @@ cmap.set_over('black',1)
 cmapMask = colors.ListedColormap(['black'])
 
 # Load background DEM image
-fileNameDEM = '/users/' + usrName + '/pyscripts/shapefiles/ccs4.png'
+dirDEM = '/users/' + usrName + '/scripts/shapefiles'
+fileNameDEM = dirDEM + '/ccs4.png'
 isFile = os.path.isfile(fileNameDEM)
 if (isFile == False):
     print('File: ', fileNameDEM, ' not found.')
@@ -152,7 +157,7 @@ allXcoords = np.arange(Xmin,Xmax+resKm*1000,resKm*1000)
 allYcoords = np.arange(Ymin,Ymax+resKm*1000,resKm*1000)
 
 # Set shapefile filename
-fileNameShapefile = "/users/" + usrName + "/pyscripts/shapefiles/CHE_adm0.shp"
+fileNameShapefile = dirDEM + '/CHE_adm0.shp'
 proj4stringWGS84 = "+proj=longlat +ellps=WGS84 +datum=WGS84"
 proj4stringCH = "+proj=somerc +lat_0=46.95240555555556 +lon_0=7.439583333333333 \
 +k_0=1 +x_0=600000 +y_0=200000 +ellps=bessel +towgs84=674.374,15.056,405.346,0,0,0,0 +units=m +no_defs" 
@@ -355,7 +360,55 @@ while timeLocal <= timeEnd:
                     
                     tocOF = time.clock()
                     print('OF time: ', tocOF-ticOF, ' seconds.')
-                    
+            
+            ### Test to compute the Short Time Foureir Transform (STFT)
+            # import stft
+            # import scipy.stats
+            # t = np.linspace(0, 10, 5001)
+            # print(t)
+            # import scipy.signal
+            # w = scipy.signal.chirp(t, f0=12.5, f1=0.5, t1=10, method='linear')
+            # #w = scipy.signal.chirp(t, f0=12.5, f1=12.5, t1=10, method='linear')
+            # #w = rainfieldZeros[:,250]
+
+            # randValues = np.random.randn(len(w))
+            
+            # specgram = stft.spectrogram(w, hopsize=128)
+            # print(specgram.shape)
+            # ps = np.abs(specgram**2)
+            # specgramNoise = stft.spectrogram(randValues, hopsize=128)
+            
+            # plt.subplot(121)
+            
+            # plt.imshow(10.0*np.log10(ps))
+            # plt.pcolormesh(10.0*np.log10(ps))
+            # ax = plt.gca()
+            # ax.set_yscale('symlog')
+
+            # ax = plt.gca()
+            # ax.set_aspect('auto')
+            
+            # plt.subplot(122)
+            # specgram = specgramNoise*specgram
+            # output = stft.ispectrogram(specgram)
+            
+            # fnoise = np.fft.fft(randValues)
+            # fprecip = np.fft.fft(w)
+            
+            # # Multiply the FFT of white noise with the FFT of the Precip field
+            # fcorrNoise = fnoise*fprecip
+            # # Do the inverse FFT
+            # corrNoise = np.fft.ifft(fcorrNoise)
+            # # Get the real part
+            # outputHom = np.array(corrNoise.real)
+            
+            # print(rainfieldZeros[100,:], output, specgram)
+            # plt.plot(stats.zscore(w))
+            # plt.plot(stats.zscore(output), color='r')
+            # plt.plot(stats.zscore(outputHom), color='k')
+            # plt.show()
+            
+            # sys.exit()
             ########### Compute Fourier power spectrum ###########
             ticFFT = time.clock()
             
@@ -371,6 +424,11 @@ while timeLocal <= timeEnd:
             
             # Compute 2D power spectrum
             psd2d = np.abs(fprecip)**2/(fftDomainSize*fftDomainSize)
+            psd2dNoShift = np.abs(fprecipNoShift)**2/(fftDomainSize*fftDomainSize)
+            
+            # Extract central region of 2d power spectrum and compute covariance
+            fftSizeSub = 40
+            psd2dsub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs = dt.compute_fft_anisotropy(psd2d, fftSizeSub)
             
             # Compute 1D radially averaged power spectrum
             bin_size = 1
@@ -448,7 +506,7 @@ while timeLocal <= timeEnd:
             ################ PLOTTING RAINFIELD AND SPECTRUM #################################
             if boolPlotting:
                 plt.close("all")
-                fig = plt.figure(figsize=(18,7))
+                fig = plt.figure(figsize=(18,7.5))
                 
                 ax = fig.add_axes()
                 ax = fig.add_subplot(111)
@@ -520,7 +578,10 @@ while timeLocal <= timeEnd:
                 plt.title(titleStr, fontsize=15)
                 
                 # Draw radar composite mask
-                plt.imshow(mask, cmap=cmapMask, extent = (Xmin, Xmax, Ymin, Ymax), alpha = 0.5)
+                rainAx.imshow(mask, cmap=cmapMask, extent = (Xmin, Xmax, Ymin, Ymax), alpha = 0.5)
+                
+                # Decompose covariance matrix and plot major and minor axis of anisotropy
+                #eigvals, eigvecs = dt.plot_bars(xbar, ybar, cov, rainAx)
                 
                 # Add product quality within image
                 dataQualityTxt = "Quality = " + str(dataQuality)
@@ -576,32 +637,51 @@ while timeLocal <= timeEnd:
                         psLims = [-20,70]
                     extentFFT = (-minFieldSize/2,minFieldSize/2,-minFieldSize/2,minFieldSize/2)
                     if (plotSpectrum == '2d'):
-                        # Xvec = freqAll
-                        # Yvec = freqAll
-                        # X,Y = np.meshgrid(Xvec,Yvec)
-                        # X,Y = np.meshgrid(freqAll,freqAll)
-                        # print(Xvec)
-                        # from scipy import interpolate
-                        # f = interpolate.interp2d(Xvec,Yvec, 10*np.log10(psd2d+0.001), kind='linear')
-                        # xi2 = np.linspace(np.min(Xvec), np.max(Xvec), 100)
-                        # yi2 = np.linspace(np.min(Yvec), np.max(Yvec), 100)
-                        # zi2 = f(xi2, yi2)
-                        # print(xi2,zi2)
-                        # im = psAx.contourf(xi2, yi2, zi2)
-                        #im = psAx.contourf(X,Y,10*np.log10(psd2d))#, vmin = psLims[0], vmax = psLims[1])
-                        #plt.gca().invert_yaxis()
-                        # psAx.set_xscale('log')
-                        # psAx.set_yscale('log')
+                        # Smooth 2d PS for plotting contours
+                        psd2dSmooth = ndimage.gaussian_filter(np.rot90(psd2d), sigma=1)
+                        psd2dSmooth = psd2dSmooth[fftDomainSize-fftSizeSub:fftDomainSize+fftSizeSub,fftDomainSize-fftSizeSub:fftDomainSize+fftSizeSub]
 
-                        im = plt.imshow(10*np.log10(psd2d),extent=(extentFFT[0], extentFFT[1], extentFFT[2], extentFFT[3]), vmin = psLims[0], vmax = psLims[1])
+                        # Plot image of 2d PS
+                        clevs = np.arange(-10,80,5)
+                        cmap = plt.get_cmap('nipy_spectral', clevs.size) #nipy_spectral, gist_ncar
+                        norm = colors.BoundaryNorm(clevs, cmap.N)
+                        im = psAx.imshow(10*np.log10(psd2dsub), interpolation='nearest',cmap=cmap, norm=norm)
+                        
+                        # Plot smooth contour of 2d PS
+                        levels = np.linspace(35,60,5)
+                        im1 = psAx.contour(10*np.log10(psd2dSmooth), levels, colors='black')
+                        
+                        # Plot major and minor axis of anisotropy
+                        dt.plot_bars(xbar, ybar, eigvals, eigvecs, psAx)
+                        
+                        plt.text(0.05, 0.95, 'eccentricity = ' + str(fmt2 % eccentricity), transform=psAx.transAxes, backgroundcolor = 'w')
+                        plt.text(0.05, 0.90, 'orientation = ' + str(fmt2 % orientation) + '$^\circ$', transform=psAx.transAxes,backgroundcolor = 'w')
+                        
+                        # Create ticks in km
+                        ticks_loc = np.arange(0,2*fftSizeSub,1)
+                        ticksList = np.hstack((np.flipud(-resKm/freq[1:fftSizeSub]),0,0,resKm/freq[1:fftSizeSub]))
+                        ticksList = ticksList.astype(int)
+
+                        idx = np.hstack((np.arange(0,fftSizeSub-3,4),fftSizeSub-2,fftSizeSub+1,np.arange(fftSizeSub+3,2*fftSizeSub,4))).astype(int)
+                        
+                        ticks_loc = ticks_loc[idx]
+                        ticksList = ticksList[idx]
+                        plt.xticks(rotation=90)
+                        psAx.set_xticks(ticks_loc)
+                        psAx.set_xticklabels(ticksList, fontsize=13)
+                        psAx.set_yticks(ticks_loc)
+                        psAx.set_yticklabels(ticksList, fontsize=13)
+                        plt.xlabel('Wavelenght [km]')
+                        plt.ylabel('Wavelenght [km]')
                     else:
                         #plt.contourf(10*np.log10(psd2dnoise), 20, vmin=-15, vmax=0)
                         
                         im = plt.imshow(10*np.log10(psd2dnoise), extent=(extentFFT[0], extentFFT[1], extentFFT[2], extentFFT[3]), vmin=-15, vmax=0)
                         plt.gca().invert_yaxis()
                     cbar = plt.colorbar(im)
-                    cbar.set_label('10log10(Power)')
-                    titleStr = str(timeLocal) + ', 2D power spectrum'
+                    cbar.ax.tick_params(labelsize=14)
+                    cbar.set_label('Power [dB]', fontsize=15)
+                    titleStr = str(timeLocal) + ', 2D power spectrum (rotated by 90$^\circ$)'
                     plt.title(titleStr)
                 
                 # Draw 1D power spectrum
@@ -647,6 +727,7 @@ while timeLocal <= timeEnd:
                         plt.plot(10*np.log10(freq),10*np.log10(psd1dnoise),'k')
                     else:
                         # Draw Power spectrum
+                        #print(10*np.log10(freq))
                         plt.plot(10*np.log10(freq),10*np.log10(psd1d),'k')
                         
                     titleStr = 'Radially averaged power spectrum'
@@ -700,7 +781,7 @@ while timeLocal <= timeEnd:
             # Headers
             headers = ['time', 'alb', 'doe', 'mle', 'ppm', 'wei', 'war', 'r_mean', 'r_std', 'r_cmean', 'r_cstd',
             'dBZ_mean', 'dBZ_std', 'dBZ_cmean', 'dBZ_cstd', 
-            'beta1', 'corr_beta1', 'beta2', 'corr_beta2']
+            'beta1', 'corr_beta1', 'beta2', 'corr_beta2' , 'eccentricity']
             
             # Data
             instantStats = [timeStampStr,
@@ -721,7 +802,8 @@ while timeLocal <= timeEnd:
             fmt3 % beta1,
             fmt3 % r_beta1,
             fmt3 % beta2,
-            fmt3 % r_beta2]
+            fmt3 % r_beta2,
+            fmt3 % eccentricity]
 
             print(instantStats)
             dailyStats.append(instantStats)

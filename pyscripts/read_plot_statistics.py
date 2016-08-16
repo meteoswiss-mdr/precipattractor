@@ -222,7 +222,7 @@ for row in range(0,subPlotNr):
             else:
                 offset = 0.0
             varX = 10*np.log10(varData[:,col] + offset)
-            varXLab = '10log10(' + varLabels[col] + ')'
+            varXLab = varLabels[col] + ' [dB]'
         else:
             varX = varData[:,col]
             varXLab = varLabels[col]
@@ -235,7 +235,7 @@ for row in range(0,subPlotNr):
             else:
                 offset = 0.0
             varY = 10*np.log10(varData[:,row] + offset)
-            varYLab = '10log10(' + varLabels[row] + ')'
+            varYLab = varLabels[row] + ' [dB]'
         else:
             varY = varData[:,row]
             varYLab = varLabels[row]
@@ -302,7 +302,7 @@ for row in range(0,subPlotNr):
                     else:
                         offset = 0.0
                     var4col = 10*np.log10(varData[idxData[0],idxVar4] + offset)
-                    labVar4 = labVar4 + '$_{log}$' #'10log10(' + labVar4 + ')'
+                    labVar4 = labVar4 + ' [dB]'
                 else:
                     var4col = varData[idxData[0],idxVar4]
 
