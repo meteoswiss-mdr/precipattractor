@@ -59,6 +59,44 @@ def get_filename_stats(inBaseDir, analysisType, timeDate, product='AQC', timeAcc
 
     return(fullName, dirName, fileName)
     
+def get_filename(inBaseDir, analysisType, timeDate, varNames, varValues, product='AQC', timeAccumMin=5, quality=0, format='netcdf', sep='_'):
+    if format == 'netcdf':
+        extension = '.nc'
+    elif format == 'csv':
+        extension = '.csv'
+    elif format == 'png':
+        extension = '.png'
+    elif format == 'gif':
+        extension = '.gif'
+    else:
+        print('Wrong file format in get_filename_stats')
+        sys.exit(1)
+        
+    if len(varNames) != len(varValues):
+        print('Number of elements in varNames and varValues must be the same.')
+        sys.exit(1)
+
+    # Create time timestamp strings
+    timeAccumMinStr = '%05i' % (timeAccumMin)
+    year, yearStr, julianDay, julianDayStr = ti.parse_datetime(timeDate)
+    hourminStr = ti.get_HHmm_str(timeDate.hour, timeDate.minute)
+    subDir = ti.get_subdir(timeDate.year, julianDay)
+        
+    inDir = inBaseDir + subDir
+    
+    ### Define filename
+    nrVars = len(varNames)
+    fullName = inDir + product + sep + analysisType + sep + yearStr + julianDayStr + hourminStr + str(quality)
+    for i in range(nrVars):
+        fullName = fullName + sep + str(varNames[i]) + str(varValues[i])
+    fullName = fullName + sep + timeAccumMinStr + extension
+        
+    # Get directory name and base filename
+    dirName = inDir
+    fileName = os.path.basename(fullName)
+
+    return(fullName, dirName, fileName)
+    
 def write_csv(fileName, headers, dataArray):
     f = open(fileName, 'w')
     csvOut = csv.writer(f)
@@ -242,7 +280,7 @@ def write_netcdf(fileName, headers, dataArray, lowRainThreshold, boolWOLS):
             nc_var.description = "Correlation coeff. of the linear fit for beta2"
             
     nc_fid.close()
-
+    
 def read_netcdf(fileName, variableNames = None):
     # Open data set
     nc_fid = Dataset(fileName, 'r', format='NETCDF4')

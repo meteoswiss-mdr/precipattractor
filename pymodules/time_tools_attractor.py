@@ -14,6 +14,7 @@ from __future__ import print_function
 import datetime
 import numpy as np
 import time
+import sys
 
 def timestring2datetime(timestring):
     '''
@@ -71,6 +72,57 @@ def datetime2juliantimestring(timeDate):
     
     timeString = yearStr + julianDayStr + hourminStr
     return(timeString)
+    
+def juliantimestring2datetime(timeString, format='YYJJJHHMM'): 
+    '''
+    Function to convert Julian time stamp string to a datetime object.
+    
+    Parameters
+    ----------
+    timeString: str
+        Time string YYYYJJJHHMMSS
+    
+    Returns
+    -------
+    timeDate : datetime
+        Datetime object
+        
+    Note: julian day starts at 001 (i.e. January 1st)
+    '''
+    if format=='YYYYJJJHHMMSS':
+        if not len(timeString) == 13:
+            print("Not the right string length.")
+            sys.exit(1)
+        year = int(timeString[0:4])
+        day = int(timeString[4:7]) - 1
+        hour = int(timeString[7:9])
+        min = int(timeString[9:11])
+        sec = int(timeString[11:13])
+        
+        totaldeltaDays = day + hour/24 + min/60/24 + sec/60/60/24
+        timeDate = datetime.datetime(year, 1, 1) + datetime.timedelta(days=totaldeltaDays) 
+
+    elif format=='YYJJJHHMM':
+        if not len(timeString) == 9:
+            print("Not the right string length.")
+            sys.exit(1)
+        year = int(timeString[0:2])
+        if year > 80:
+            year = 1900 + year
+        else:
+            year = 2000 + year
+        day = int(timeString[2:5]) - 1
+        hour = int(timeString[5:7])
+        min = int(timeString[7:9])
+    
+        totaldeltaDays = day + hour/24 + min/60/24
+        timeDate = datetime.datetime(year, 1, 1) + datetime.timedelta(days=totaldeltaDays) 
+        
+    else:
+        print("Julian time stamp string format not supported.")
+        sys.exit(1)
+
+    return(timeDate)   
  
 def get_julianday(timeDate):
     '''

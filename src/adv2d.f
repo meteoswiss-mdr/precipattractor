@@ -1,6 +1,6 @@
 
 
-      subroutine advxy (u,v,z,pos)
+      subroutine advxy (u,v,z,pos,imax,jmax)
 c horizontal advection subroutine.
 c increase of the advection grid (ag) by one grid point 
 c around the boundaries of the model grid (mg):
@@ -29,25 +29,33 @@ c cu(i-1,j)     zz(i,j)       cu(i,j)
 c :                                 :
 c :                                 :
 c .............cv(i,j-1).............
-c
+c compile code as python module:
+c f2py -c -m adv2d adv2d.f
 
-Cf2py intent(in) z
-Cf2py intent(out) z
+Cf2py intent(in,out) z
 Cf2py intent(in) v
 Cf2py intent(in) u
 Cf2py intent(in) pos
-
-      parameter (imax=512,jmax=512)
-      dimension u(imax,jmax),v(imax,jmax),z(imax,jmax)
-c size of ag is (nx,ny): nx=imax+2, ny=jmax+2.
-      parameter (nx=imax+2,ny=jmax+2)
-      dimension cu(nx,ny),cv(nx,ny),zz(nx,ny)
-      dimension z1(jmax),z2(imax),z3(jmax),z4(imax)
-      data z1/jmax*1./
-      data z2/imax*1./
-      data z3/jmax*1./
-      data z4/imax*1./
+        
+      real u(imax,jmax),v(imax,jmax),z(imax,jmax)
+      real cu(imax+2,jmax+2),cv(imax+2,jmax+2),zz(imax+2,jmax+2)
+      real z1(jmax),z2(imax),z3(jmax),z4(imax)
       logical pos
+      integer i,j,nx,ny
+c size of ag is (nx,ny): nx=imax+2, ny=jmax+2.    
+      nx=imax+2
+      ny=jmax+2
+
+c     ---Init arrays with ones
+      do j=1,jmax
+        z1(j)=0
+        z3(j)=0
+      enddo
+      do i=1,imax
+        z2(i)=0
+        z4(i)=0
+      enddo    
+      
 c Courant numbers cu, cv in ag:
 c linear interpolation of horizontal wind field from the center of
 c grid box (i,j) in mg to the boundaries of grid box (i+1,j+1) in ag.
@@ -103,9 +111,9 @@ c lower (j=1) and upper (j=ny) boundary of ag:
 c call horizontal advection scheme:
 c if (pos) positive definite (advpxy) else monotone (advmxy) version.
       if (pos) then
-         call advpxy (cu,cv,zz,nx,ny)
+         call advpxy (cu,cv,zz,nx,ny,max(nx,ny))
       else
-         call advmxy (cu,cv,zz,nx,ny)
+         call advmxy (cu,cv,zz,nx,ny,max(nx,ny))
       endif
 c redistribution of transport quantity from ag to mg.
       do i=1,imax
@@ -116,10 +124,9 @@ c redistribution of transport quantity from ag to mg.
       return
       end
 
-      subroutine advmxy (cu,cv,zz,nx,ny)
+      subroutine advmxy (cu,cv,zz,nx,ny,m)
 c monotone advection scheme: 1) x-advection, 2) y-advection.
 c parameter m is max(nx,ny)
-      parameter (m=514)
       double precision c(m),z(m),df(m),dfz(m,m)
       dimension cu(nx,ny),cv(nx,ny),zz(nx,ny)
 c x-advection
@@ -146,10 +153,10 @@ c y-advection
       return
       end
 
-      subroutine advmyx (cu,cv,zz,nx,ny)
+      subroutine advmyx (cu,cv,zz,nx,ny,m)
 c monotone advection scheme: 1) y-advection, 2) x-advection.
 c parameter m=max(nx,ny)
-      parameter (m=102)
+c      parameter (m=102)
       double precision c(m),z(m),df(m),dfz(m,m)
       dimension cu(nx,ny),cv(nx,ny),zz(nx,ny)
 c y-advection
@@ -196,11 +203,10 @@ c fm(i), fp(i) are fluxes for c(i)<0 and c(i)>0, respectively.
 c fm(i) is flux from gridbox i+1 into gridbox i for c(i)<0,
 c fp(i) is flux from gridbox i into gridbox i+1 for c(i)>0.
 c fmm(i), fpp(i) are monotone fluxes; df(i) are deformation terms.
-      parameter (m=514)
       implicit double precision (a-h)
       implicit double precision (o-z)
-      dimension a0(m),a1(m),a2(m),a3(m),a4(m),y(m),c(m),
-     &          fm(m),fp(m),w(m),fmm(m),fpp(m),df(m)
+      dimension a0(n),a1(n),a2(n),a3(n),a4(n),y(n),c(n),
+     &          fm(n),fp(n),w(n),fmm(n),fpp(n),df(n)
       a0(2)=(26.*y(2)-y(3)-y(1))/24.
       a1(2)=(y(3)-y(1))/16.
       a2(2)=(y(3)+y(1)-2.*y(2))/48.
@@ -263,10 +269,9 @@ c fmm(i), fpp(i) are monotone fluxes; df(i) are deformation terms.
       return
       end
 
-      subroutine advpxy (cu,cv,zz,nx,ny)
+      subroutine advpxy (cu,cv,zz,nx,ny,m)
 c positive definite advection scheme: 1) x-advection, 2) y-advection.
 c parameter m is max(nx,ny)
-      parameter (m=514)
       double precision c(m),z(m)
       dimension cu(nx,ny),cv(nx,ny),zz(nx,ny)
 c x-advection
@@ -290,10 +295,10 @@ c y-advection
       return
       end
 
-      subroutine advpyx (cu,cv,zz,nx,ny)
+      subroutine advpyx (cu,cv,zz,nx,ny,m)
 c positive definite advection scheme: 1) y-advection, 2) x-advection.
 c parameter m is max(nx,ny)
-      parameter (m=514)
+c      parameter (m=514)
       double precision c(m),z(m)
       dimension cu(nx,ny),cv(nx,ny),zz(nx,ny)
 c y-advection
@@ -334,10 +339,10 @@ c c(i), fm(i), fp(i)  are given at the right boundary of grid cell i.
 c fm(i), fp(i) are fluxes for c(i)<0 and c(i)>0, respectively.
 c fm(i) is flux from gridbox i+1 into gridbox i for c(i)<0,
 c fp(i) is flux from gridbox i into gridbox i+1 for c(i)>0.
-      parameter (m=514)
+c      parameter (m=514)
       implicit double precision (a-h)
       implicit double precision (o-z)
-      dimension y(m),c(m),fm(m),fp(m),w(m)
+      dimension y(n),c(n),fm(n),fp(n),w(n)
       cr=dmax1(0.d0,c(1))
       fp(1)=dmin1(y(1),cr*(y(1)+(1.-cr)*(y(2)-y(1))*0.5))
       w(1)=1.
