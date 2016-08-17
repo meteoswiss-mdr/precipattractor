@@ -642,6 +642,7 @@ while timeLocal <= timeEnd:
                         psd2dSmooth = psd2dSmooth[fftDomainSize-fftSizeSub:fftDomainSize+fftSizeSub,fftDomainSize-fftSizeSub:fftDomainSize+fftSizeSub]
 
                         # Plot image of 2d PS
+                        #psAx.invert_yaxis()
                         clevs = np.arange(-10,80,5)
                         cmap = plt.get_cmap('nipy_spectral', clevs.size) #nipy_spectral, gist_ncar
                         norm = colors.BoundaryNorm(clevs, cmap.N)
@@ -659,20 +660,29 @@ while timeLocal <= timeEnd:
                         
                         # Create ticks in km
                         ticks_loc = np.arange(0,2*fftSizeSub,1)
-                        ticksList = np.hstack((np.flipud(-resKm/freq[1:fftSizeSub]),0,0,resKm/freq[1:fftSizeSub]))
-                        ticksList = ticksList.astype(int)
-
-                        idx = np.hstack((np.arange(0,fftSizeSub-3,4),fftSizeSub-2,fftSizeSub+1,np.arange(fftSizeSub+3,2*fftSizeSub,4))).astype(int)
                         
-                        ticks_loc = ticks_loc[idx]
-                        ticksList = ticksList[idx]
+                        # List of ticks for X and Y (reference from top)
+                        ticksListX = np.hstack((np.flipud(-resKm/freq[1:fftSizeSub+1]),0,resKm/freq[1:fftSizeSub])).astype(int)
+                        ticksListY = np.flipud(ticksListX)
+                        
+                        # List of indices where to display the ticks
+                        if fftSizeSub <= 20:
+                            idxTicksX = np.hstack((np.arange(0,fftSizeSub-1,2),fftSizeSub-1,fftSizeSub+1,np.arange(fftSizeSub+2,2*fftSizeSub,2))).astype(int)
+                            idxTicksY = np.hstack((np.arange(1,fftSizeSub-2,2),fftSizeSub-2,fftSizeSub,np.arange(fftSizeSub+1,2*fftSizeSub,2))).astype(int)
+                        else:
+                            idxTicksX = np.hstack((np.arange(1,fftSizeSub-2,4),fftSizeSub-1,fftSizeSub+1,np.arange(fftSizeSub+3,2*fftSizeSub,4))).astype(int)
+                            idxTicksY = np.hstack((np.arange(0,fftSizeSub-3,4),fftSizeSub-2,fftSizeSub,np.arange(fftSizeSub+2,2*fftSizeSub,4))).astype(int)
+                        
                         plt.xticks(rotation=90)
-                        psAx.set_xticks(ticks_loc)
-                        psAx.set_xticklabels(ticksList, fontsize=13)
-                        psAx.set_yticks(ticks_loc)
-                        psAx.set_yticklabels(ticksList, fontsize=13)
+                        psAx.set_xticks(ticks_loc[idxTicksX])
+                        psAx.set_xticklabels(ticksListX[idxTicksX], fontsize=13)
+                        psAx.set_yticks(ticks_loc[idxTicksY])
+                        psAx.set_yticklabels(ticksListY[idxTicksY], fontsize=13)
+
                         plt.xlabel('Wavelenght [km]')
                         plt.ylabel('Wavelenght [km]')
+                        
+                        #plt.gca().invert_yaxis()
                     else:
                         #plt.contourf(10*np.log10(psd2dnoise), 20, vmin=-15, vmax=0)
                         
