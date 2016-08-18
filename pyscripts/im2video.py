@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+from __future__ import print_function
 
 import argparse
 import sys
@@ -13,7 +14,7 @@ import io_tools_attractor as io
 #######################
 product = 'CPC'
 inBaseDir = '/scratch/lforesti/data/' # directory to read from
-plotSpectrum = '2d'
+plotSpectrum = '1d'
 outBaseDir = '/users/lforesti/results/'
 framesPerSecond = 3
 timeAccumMin = 5
@@ -23,8 +24,11 @@ parser = argparse.ArgumentParser(description='Plot radar rainfall field statisti
 parser.add_argument('-start', default='201601310000', type=str,help='Starting date YYYYMMDDHHmmSS.')
 parser.add_argument('-end', default='201601310000', type=str,help='Starting date YYYYMMDDHHmmSS.')
 parser.add_argument('-product', default='AQC', type=str,help='Which radar rainfall product to use (AQC, CPC, etc).')
+parser.add_argument('-format', default='mp4', type=str,help='Video format (mp4 or avi).')
+
 args = parser.parse_args()
 
+extension = '.' + args.format
 product = args.product
 if (int(args.start) > int(args.end)):
     print('Time end should be after time start')
@@ -50,8 +54,12 @@ if len(fileList) == 0:
     sys.exit()
 
 ######## Generate clip
-print('Foudn files for video: ', fileList)
+
+print("Nr. files: ", len(fileList))
+print('Files found for video: ', *fileList, sep='\n')
+
 clip = ImageSequenceClip(fileList, fps=framesPerSecond)
+
 # Write out clip
-outputFileName = outBaseDir + product + timeStartStr + '-' + timeEndStr + '_movieDBZ_' + plotSpectrum + 'PS.mp4'
+outputFileName = outBaseDir + product + timeStartStr + '-' + timeEndStr + '_movieDBZ_' + plotSpectrum + 'PS' + extension
 clip.write_videofile(outputFileName)

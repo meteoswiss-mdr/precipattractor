@@ -643,14 +643,16 @@ while timeLocal <= timeEnd:
 
                         # Plot image of 2d PS
                         #psAx.invert_yaxis()
-                        clevs = np.arange(-10,80,5)
-                        cmap = plt.get_cmap('nipy_spectral', clevs.size) #nipy_spectral, gist_ncar
-                        norm = colors.BoundaryNorm(clevs, cmap.N)
-                        im = psAx.imshow(10*np.log10(psd2dsub), interpolation='nearest',cmap=cmap, norm=norm)
+                        clevsPS = np.arange(-10,80,5)
+                        cmapPS = plt.get_cmap('nipy_spectral', clevsPS.shape[0]) #nipy_spectral, gist_ncar
+                        cmapPS.set_over('Magenta',1)
+                        normPS = colors.BoundaryNorm(clevsPS, cmap.N)
+                        
+                        imPS = psAx.imshow(10*np.log10(psd2dsub), interpolation='nearest', cmap=cmapPS, norm=normPS)
                         
                         # Plot smooth contour of 2d PS
-                        levels = np.linspace(35,60,5)
-                        im1 = psAx.contour(10*np.log10(psd2dSmooth), levels, colors='black')
+                        levelsPS = np.linspace(35,60,5)
+                        im1 = psAx.contour(10*np.log10(psd2dSmooth), levelsPS, colors='black')
                         
                         # Plot major and minor axis of anisotropy
                         dt.plot_bars(xbar, ybar, eigvals, eigvecs, psAx)
@@ -686,9 +688,9 @@ while timeLocal <= timeEnd:
                     else:
                         #plt.contourf(10*np.log10(psd2dnoise), 20, vmin=-15, vmax=0)
                         
-                        im = plt.imshow(10*np.log10(psd2dnoise), extent=(extentFFT[0], extentFFT[1], extentFFT[2], extentFFT[3]), vmin=-15, vmax=0)
+                        imPS = plt.imshow(10*np.log10(psd2dnoise), extent=(extentFFT[0], extentFFT[1], extentFFT[2], extentFFT[3]), vmin=-15, vmax=0)
                         plt.gca().invert_yaxis()
-                    cbar = plt.colorbar(im)
+                    cbar = plt.colorbar(imPS, ticks=clevsPS, spacing='uniform', norm=normPS, extend='max', fraction=0.03)
                     cbar.ax.tick_params(labelsize=14)
                     cbar.set_label('Power [dB]', fontsize=15)
                     titleStr = str(timeLocal) + ', 2D power spectrum (rotated by 90$^\circ$)'
@@ -723,7 +725,7 @@ while timeLocal <= timeEnd:
                     txt = r'$\beta_2$ = ' + (fmt2 % beta2) + ",   r = " + (fmt3 % r_beta2)
                     psAx.text(10*np.log10(freqLimBeta2[0]),startY-6, txt, color='r')
                     
-                    txt = 'WAR = ' + (fmt1 % war) + ' %,   IMF = ' + (fmt3 %rainmean) + ' mm/hr'
+                    txt = 'WAR = ' + (fmt1 % war) + ' %,   MM = ' + (fmt3 %raincondmean) + ' mm/hr'
                     psAx.text(10*np.log10(freqLimBeta2[0]),startY-9, txt)
                     
                     if (rainThresholdWAR < 0.01): 
