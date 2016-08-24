@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import statsmodels.formula.api as sm
 from statsmodels.nonparametric.api import KernelReg
+import cv2
 
 from scipy import stats
 import matplotlib.colors as colors
@@ -292,11 +293,11 @@ def decompose_cov_plot_bars(x_bar, y_bar, cov, ax):
     ax.axis('image')
     return(eigvals,eigvecs)
 
-def plot_bars(x_bar, y_bar, eigvals, eigvecs, ax):
+def plot_bars(x_bar, y_bar, eigvals, eigvecs, ax, colour='white'):
     """Plot bars with a length of 2 stddev along the principal axes."""
     mean = np.array([x_bar, y_bar])
-    ax.plot(*make_lines(eigvals, eigvecs, mean, 0), marker='o', color='white')
-    ax.plot(*make_lines(eigvals, eigvecs, mean, -1), marker='o', color='white')
+    ax.plot(*make_lines(eigvals, eigvecs, mean, 0), marker='o', color=colour)
+    ax.plot(*make_lines(eigvals, eigvecs, mean, -1), marker='o', color=colour)
     ax.axis('image')
 
 def cart2pol(x, y):
@@ -309,10 +310,12 @@ def pol2cart(rho, phi):
     y = rho * np.sin(phi)
     return(x, y)
 
-def compute_fft_anisotropy(psd2d, fftSizeSub = 0, percentileZero = 0, rotation = True):
+def compute_fft_anisotropy(psd2d, fftSizeSub = -1, percentileZero = 0, rotation = True, radius = -1):
     ''' 
     Function to compute the anisotropy from a 2d power spectrum or autocorrelation function
     '''
+    if fftSizeSub == -1:
+        fftSizeSub = psd2d.shape[0]
     
     fftSize = psd2d.shape
     
@@ -321,10 +324,19 @@ def compute_fft_anisotropy(psd2d, fftSizeSub = 0, percentileZero = 0, rotation =
         sys.exit(1)
     fftMiddleX = fftSize[1]/2
     fftMiddleY = fftSize[0]/2
-
+    
     # Select subset of spectrum
     psd2dsub = psd2d[fftMiddleY-fftSizeSub:fftMiddleY+fftSizeSub,fftMiddleX-fftSizeSub:fftMiddleX+fftSizeSub]
 
+    # Apply circular mask
+    if radius != -1:
+        # Create circular mask
+        y,x = np.ogrid[-fftSizeSub:fftSizeSub, -fftSizeSub:fftSizeSub]
+        mask = x**2+y**2 <= radius**2
+        
+        # Apply mask to 2d spectrum
+        psd2dsub[~mask] = 0.0
+    
     # Rotate FFT spectrum by 90 degrees
     if rotation:
         psd2dsub = np.rot90(psd2dsub)
@@ -343,6 +355,10 @@ def compute_fft_anisotropy(psd2d, fftSizeSub = 0, percentileZero = 0, rotation =
         print("Nr non-zero pixels in spectrum for anisotropy estimation: ", nrNonZeroPixels)
     else:
         percZero = np.min(psd2dsubPerc)
+    
+    # Apply opening operator to remove small regions
+    # kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(35,35))
+    # psd2dsubPerc = cv2.morphologyEx(psd2dsubPerc, cv2.MORPH_OPEN, kernel)
 
     # import matplotlib.pyplot as plt
     # plt.imshow(psd2dsubPerc)

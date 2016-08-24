@@ -386,7 +386,7 @@ while timeLocal <= timeEnd:
             psd2dNoShift = np.abs(fprecipNoShift)**2/(fftDomainSize*fftDomainSize)
             
             # Compute autocorrelation using inverse FFT of spectrum
-            if plotSpectrum == 'autocorr':
+            if plotSpectrum == 'autocorr' or plotSpectrum == '1d':
                 DCval = psd2dNoShift[0]
                 precipVar = np.std(rainfieldZeros)
                 spectralSum = np.sum(psd2dNoShift)
@@ -402,13 +402,14 @@ while timeLocal <= timeEnd:
                 autocorr = autocorr.real
                 
                 # Compute anisotropy from autocorrelation function
-                fftSizeSub = 200
-                autocorrSub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs,_ = dt.compute_fft_anisotropy(autocorr, fftSizeSub, percentileZero=0, rotation=False)
+                fftSizeSub = 255
+                percentileZero = 75
+                radius = 100
+                autocorrSub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs, percZero = dt.compute_fft_anisotropy(autocorr, fftSizeSub, percentileZero, rotation=False, radius=radius)
             
-            if plotSpectrum == '2d':
+            if plotSpectrum == '2d' or plotSpectrum == '1d':
                 # Extract central region of 2d power spectrum and compute covariance
                 cov2logPS = True # Whether to compute the anisotropy on the log of the 2d PS
-                percentileZero = 99
                 if cov2logPS:
                     psd2d_anis = 10.0*np.log10(psd2d)
                 else:
@@ -416,6 +417,7 @@ while timeLocal <= timeEnd:
                 
                 # Compute anisotropy from FFT spectrum
                 fftSizeSub = 40
+                percentileZero = 99
                 psd2dsub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs, percZero = dt.compute_fft_anisotropy(psd2d_anis, fftSizeSub, percentileZero)
             
             # Compute 1D radially averaged power spectrum
@@ -442,33 +444,75 @@ while timeLocal <= timeEnd:
             freq[freq==0] = np.nan
             
             ############ Compute spectral slopes Beta
-            largeScalesLims = np.array([512,20])
-            smallScalesLims = np.array([20,3])
-            idxBeta1 = (wavelengthKm <= largeScalesLims[0]) & (wavelengthKm > largeScalesLims[1]) # large scales
-            idxBeta2 = (wavelengthKm <= smallScalesLims[0]) & (wavelengthKm > smallScalesLims[1]) # small scales
-            
-            #print('Nr points beta1 = ', np.sum(idxBeta1))
-            #print('Nr points beta2 = ', np.sum(idxBeta2))
-            #io.write_csv('/users/' + usrName + '/results/ps_marco.csv', ['freq','psd'], np.asarray([freq,psd1d]).T.tolist())
-            
-            # Compute betas using  OLS
-            if weightedOLS == 0:
-                beta1, intercept_beta1, r_beta1 = dt.compute_beta_sm(10*np.log10(freq[idxBeta1]),10*np.log10(psd1d[idxBeta1]))          
-                beta2, intercept_beta2, r_beta2  = dt.compute_beta_sm(10*np.log10(freq[idxBeta2]), 10*np.log10(psd1d[idxBeta2]))
-            elif weightedOLS == 1:
-                # Compute betas using weighted OLS
-                linWeights = len(freq[idxBeta1]) - np.arange(len(freq[idxBeta1]))
-                #logWeights = 10*np.log10(linWeights)
-                logWeights = linWeights
-                beta1, intercept_beta1,r_beta1  = dt.compute_beta_sm(10*np.log10(freq[idxBeta1]), 10*np.log10(psd1d[idxBeta1]), logWeights)
+            scalingBreakArray_KM = [6,8,10,12,14,18,20,25,30,40,60,80,100]
+            r_beta1_best = 0
+            r_beta2_best = 0
+            for s in range(0,len(scalingBreakArray_KM)):
+                scalingBreak_KM = scalingBreakArray_KM[s]
+                largeScalesLims = np.array([512,scalingBreak_KM])
+                smallScalesLims = np.array([scalingBreak_KM,3])
+                idxBeta1 = (wavelengthKm <= largeScalesLims[0]) & (wavelengthKm > largeScalesLims[1]) # large scales
+                idxBeta2 = (wavelengthKm <= smallScalesLims[0]) & (wavelengthKm > smallScalesLims[1]) # small scales
+                idxBetaBoth = (wavelengthKm <= largeScalesLims[0]) & (wavelengthKm > smallScalesLims[1]) # large scales
                 
-                linWeights = len(freq[idxBeta2]) - np.arange(len(freq[idxBeta2]))
-                #logWeights = 10*np.log10(linWeights)
-                logWeights = linWeights
-                beta2, intercept_beta2, r_beta2  = dt.compute_beta_sm(10*np.log10(freq[idxBeta2]), 10*np.log10(psd1d[idxBeta2]), logWeights)
-            else:
-                print("Please set weightedOLS either to 0 or 1")
-                sys.exit(1)
+                #print('Nr points beta1 = ', np.sum(idxBeta1))
+                #print('Nr points beta2 = ', np.sum(idxBeta2))
+                #io.write_csv('/users/' + usrName + '/results/ps_marco.csv', ['freq','psd'], np.asarray([freq,psd1d]).T.tolist())
+                
+                # Compute betas using  OLS
+                if weightedOLS == 0:
+                    beta1, intercept_beta1, r_beta1 = dt.compute_beta_sm(10*np.log10(freq[idxBeta1]),10*np.log10(psd1d[idxBeta1]))          
+                    beta2, intercept_beta2, r_beta2  = dt.compute_beta_sm(10*np.log10(freq[idxBeta2]), 10*np.log10(psd1d[idxBeta2]))
+                elif weightedOLS == 1:
+                    # Compute betas using weighted OLS
+                    linWeights = len(freq[idxBeta1]) - np.arange(len(freq[idxBeta1]))
+                    #logWeights = 10*np.log10(linWeights)
+                    logWeights = linWeights
+                    beta1, intercept_beta1,r_beta1  = dt.compute_beta_sm(10*np.log10(freq[idxBeta1]), 10*np.log10(psd1d[idxBeta1]), logWeights)
+                    
+                    linWeights = len(freq[idxBeta2]) - np.arange(len(freq[idxBeta2]))
+                    #logWeights = 10*np.log10(linWeights)
+                    logWeights = linWeights
+                    beta2, intercept_beta2, r_beta2  = dt.compute_beta_sm(10*np.log10(freq[idxBeta2]), 10*np.log10(psd1d[idxBeta2]), logWeights)
+                else:
+                    print("Please set weightedOLS either to 0 or 1")
+                    sys.exit(1)
+                
+                # Select best fit based on scaling break                   
+                if np.abs(r_beta1 + r_beta2) > np.abs(r_beta1_best + r_beta2_best):
+                    r_beta1_best = r_beta1
+                    r_beta2_best = r_beta2
+                    beta1_best = beta1
+                    intercept_beta1_best = intercept_beta1
+                    beta2_best = beta2
+                    intercept_beta2_best = intercept_beta2
+                    scalingBreak_best = scalingBreak_KM
+                    smallScalesLims_best = smallScalesLims
+                    largeScalesLims_best = largeScalesLims
+                    scalingBreak_Idx = idxBeta2[0]
+                    
+            r_beta1 = r_beta1_best
+            r_beta2 = r_beta2_best
+            beta1 = beta1_best
+            beta2 = beta2_best
+            intercept_beta1 = intercept_beta1_best
+            intercept_beta2 = intercept_beta2_best
+            smallScalesLims = smallScalesLims_best
+            largeScalesLims = largeScalesLims_best
+
+            print("Best scaling break = ", scalingBreak_best, ' km')
+            
+            # Compute betas using splines
+            # from scipy import interpolate,optimize
+            # def piecewise_linear(x, x0, y0, k1, k2):
+                # return np.piecewise(x, [x < x0], [lambda x:k1*x + y0-k1*x0, lambda x:k2*x + y0-k2*x0])
+            # p,e = optimize.curve_fit(piecewise_linear, 10*np.log10(freq[1:-10]), 10*np.log10(psd1d[1:-10]))
+            # print(p,e)
+            
+            # tck = interpolate.splrep(10*np.log10(freq[idxBetaBoth]), 10*np.log10(psd1d[idxBetaBoth]), k=3, s=0)
+            # dev_2 = interpolate.splev(10*np.log10(freq[idxBetaBoth]), tck, der=2)
+            # turning_point_mask = dev_2 == np.amax(dev_2)
+            
             #print('beta1: ', beta1, ', beta2: ', beta2)
             #print(bin_centers)
             #print(freq)
@@ -619,14 +663,36 @@ while timeLocal <= timeEnd:
                 
                 # Draw autocorrelation function
                 if (plotSpectrum == 'autocorr'):
+                    maxAutocov = np.max(autocorrSub)
+                    if maxAutocov > 50:
+                        clevsPS = np.arange(0,200,10)
+                    elif maxAutocov > 10:
+                        clevsPS = np.arange(0,50,5)
+                    else:
+                        clevsPS = np.arange(0,10,0.5)
+                    cmapPS = plt.get_cmap('nipy_spectral', clevsPS.shape[0]) #nipy_spectral, gist_ncar
+                    normPS = colors.BoundaryNorm(clevsPS, cmapPS.N)
+                    cmapPS.set_over('white',1)
+                        
                     ext = (-fftSizeSub, fftSizeSub, -fftSizeSub, fftSizeSub)
-                    imPS = psAx.imshow(np.flipud(autocorrSub), extent = ext)
-                    cbar = plt.colorbar(imPS)
+                    imPS = psAx.imshow(np.flipud(autocorrSub), cmap = cmapPS, norm=normPS, extent = ext)
+                    cbar = plt.colorbar(imPS, ticks=clevsPS, spacing='uniform', norm=normPS, extend='max', fraction=0.03)
+                    
+                    percentiles = [70,80,90,95,98,99,99.5]
+                    levelsPS = np.array(dt.percentiles(autocorrSub, percentiles))
+                    argNonZero = np.nonzero(levelsPS)
+                    
+                    levelsPS = levelsPS[argNonZero]
+                    print("Contour levels quantiles: ",percentiles)
+                    print("Contour levels 2d PS    : ", levelsPS)
+                    if np.sum(levelsPS) != 0:
+                        im1 = psAx.contour(autocorrSub, levelsPS, colors='black', alpha = 0.5, extent = ext)
+                        im1 = psAx.contour(autocorrSub, [percZero], colors='black', extent = ext)
                     
                     # Plot major and minor axis of anisotropy
                     xbar = xbar - fftSizeSub
                     ybar = ybar - fftSizeSub
-                    dt.plot_bars(xbar, ybar, eigvals, eigvecs, psAx)
+                    dt.plot_bars(xbar, ybar, eigvals, eigvecs, psAx, 'red')
                     psAx.invert_yaxis()
 
                     plt.text(0.05, 0.95, 'eccentricity = ' + str(fmt2 % eccentricity), transform=psAx.transAxes, backgroundcolor = 'w')
@@ -656,10 +722,10 @@ while timeLocal <= timeEnd:
 
                         # Plot image of 2d PS
                         #psAx.invert_yaxis()
-                        clevsPS = np.arange(-10,80,5)
+                        clevsPS = np.arange(-10,75,5)
                         cmapPS = plt.get_cmap('nipy_spectral', clevsPS.shape[0]) #nipy_spectral, gist_ncar
-                        cmapPS.set_over('Magenta',1)
-                        normPS = colors.BoundaryNorm(clevsPS, cmap.N)
+                        normPS = colors.BoundaryNorm(clevsPS, cmapPS.N)
+                        cmapPS.set_over('white',1)
                         
                         # Compute alpha transparency vector
                         #cmapPS._init()
@@ -675,10 +741,12 @@ while timeLocal <= timeEnd:
                         levelsPS = np.array(dt.percentiles(psd2dSmooth, percentiles))
                         print("Contour levels quantiles: ",percentiles)
                         print("Contour levels 2d PS    : ", levelsPS)
-                        im1 = psAx.contour(psd2dSmooth, levelsPS, colors='black')
+                        if np.sum(levelsPS) != 0:
+                            im1 = psAx.contour(psd2dSmooth, levelsPS, colors='black', alpha=0.5)
+                            im1 = psAx.contour(psd2dSmooth, [percZero], colors='black')
                         
                         # Plot major and minor axis of anisotropy
-                        dt.plot_bars(xbar, ybar, eigvals, eigvecs, psAx)
+                        dt.plot_bars(xbar, ybar, eigvals, eigvecs, psAx, 'red')
                         
                         plt.text(0.05, 0.95, 'eccentricity = ' + str(fmt2 % eccentricity), transform=psAx.transAxes, backgroundcolor = 'w')
                         plt.text(0.05, 0.90, 'orientation = ' + str(fmt2 % orientation) + '$^\circ$', transform=psAx.transAxes,backgroundcolor = 'w')
@@ -729,33 +797,41 @@ while timeLocal <= timeEnd:
                     psdLimBeta2 = intercept_beta2+beta2*10*np.log10(freqLimBeta2)
                     plt.plot(10*np.log10(freqLimBeta2), psdLimBeta2,'r--')
                     
+                    # Draw turning point
+                    plt.vlines(x=10*np.log10(1.0/scalingBreak_best), ymin=psdLimBeta2[0]-5, ymax = psdLimBeta2[0]+5, linewidth=0.5, color='grey')
+                    
                     # Write betas and correlations
-                    if fourierVar == 'rainrate':
-                        startY = 35
-                    if fourierVar == 'dbz':
-                        startY = 65
+                    startX = 0.7
+                    startY = 0.95
+                    offsetY = 0.04
                     
                     if weightedOLS == 0:
                         txt = "Ordinary least squares"
                     if weightedOLS == 1:
                         txt = "Weighted ordinary least squares"
 
-                    psAx.text(10*np.log10(freqLimBeta2[0]),startY, txt, color='k')
+                    psAx.text(startX,startY, txt, color='k', transform=psAx.transAxes)
                     
                     txt = r'$\beta_1$ = ' + (fmt2 % beta1) + ",   r = " + (fmt3 % r_beta1)
-                    psAx.text(10*np.log10(freqLimBeta2[0]),startY-3, txt, color='b')
+                    psAx.text(startX,startY-offsetY, txt, color='b', transform=psAx.transAxes)
                     
                     txt = r'$\beta_2$ = ' + (fmt2 % beta2) + ",   r = " + (fmt3 % r_beta2)
-                    psAx.text(10*np.log10(freqLimBeta2[0]),startY-6, txt, color='r')
+                    psAx.text(startX,startY-2*offsetY, txt, color='r', transform=psAx.transAxes)
                     
-                    txt = 'WAR = ' + (fmt1 % war) + ' %,   MM = ' + (fmt3 %raincondmean) + ' mm/hr'
-                    psAx.text(10*np.log10(freqLimBeta2[0]),startY-9, txt)
+                    txt = 'WAR = ' + (fmt1 % war) + ' %'
+                    psAx.text(startX,startY-3*offsetY, txt, transform=psAx.transAxes)
+                    
+                    txt = 'MM = ' + (fmt3 %raincondmean) + ' mm/hr'
+                    psAx.text(startX,startY-4*offsetY, txt, transform=psAx.transAxes)
                     
                     if (rainThresholdWAR < 0.01): 
                         txt = 'Rmin = ' + (fmt3 % rainThresholdWAR) + ' mm/hr'
                     else:
                         txt = 'Rmin = ' + (fmt2 % rainThresholdWAR) + ' mm/hr'
-                    psAx.text(10.0*np.log10(freqLimBeta2[0]),startY-12, txt)
+                    psAx.text(startX,startY-5*offsetY, txt, transform=psAx.transAxes)
+                    
+                    txt = 'Scaling break = ' + str(scalingBreak_best) + ' km'
+                    psAx.text(startX,startY-6*offsetY, txt, transform=psAx.transAxes)
                     
                     if plotSpectrum == '1dnoise':
                         # Draw 1d noise spectrum
