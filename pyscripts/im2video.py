@@ -24,10 +24,12 @@ parser = argparse.ArgumentParser(description='Plot radar rainfall field statisti
 parser.add_argument('-start', default='201601310000', type=str,help='Starting date YYYYMMDDHHmmSS.')
 parser.add_argument('-end', default='201601310000', type=str,help='Starting date YYYYMMDDHHmmSS.')
 parser.add_argument('-product', default='AQC', type=str,help='Which radar rainfall product to use (AQC, CPC, etc).')
+parser.add_argument('-spec', default='1d', type=str,help='Spectrum type (1d, 2d or autocorr).')
 parser.add_argument('-format', default='mp4', type=str,help='Video format (mp4 or avi).')
 
 args = parser.parse_args()
 
+plotSpectrum = args.spec
 extension = '.' + args.format
 product = args.product
 if (int(args.start) > int(args.end)):

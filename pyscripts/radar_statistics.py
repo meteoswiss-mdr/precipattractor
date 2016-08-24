@@ -24,6 +24,7 @@ import time
 import warnings
 import cv2
 
+import pyfftw
 from scipy import fftpack,stats
 import scipy.ndimage as ndimage
 
@@ -56,6 +57,7 @@ fourierVar = 'dbz' # field on which to perform the fourier analysis ('rainrate' 
 plotSpectrum = '1d' #'1d', '2d', '1dnoise','2dnoise' or 'noise field'
 fftDomainSize = 512
 weightedOLS = 1
+FFTmod = 'NUMPY' # 'FFTW' or 'NUMPY'
 
 ########GET ARGUMENTS FROM CMD LINE####
 parser = argparse.ArgumentParser(description='Compute radar rainfall field statistics.')
@@ -361,54 +363,6 @@ while timeLocal <= timeEnd:
                     tocOF = time.clock()
                     print('OF time: ', tocOF-ticOF, ' seconds.')
             
-            ### Test to compute the Short Time Foureir Transform (STFT)
-            # import stft
-            # import scipy.stats
-            # t = np.linspace(0, 10, 5001)
-            # print(t)
-            # import scipy.signal
-            # w = scipy.signal.chirp(t, f0=12.5, f1=0.5, t1=10, method='linear')
-            # #w = scipy.signal.chirp(t, f0=12.5, f1=12.5, t1=10, method='linear')
-            # #w = rainfieldZeros[:,250]
-
-            # randValues = np.random.randn(len(w))
-            
-            # specgram = stft.spectrogram(w, hopsize=128)
-            # print(specgram.shape)
-            # ps = np.abs(specgram**2)
-            # specgramNoise = stft.spectrogram(randValues, hopsize=128)
-            
-            # plt.subplot(121)
-            
-            # plt.imshow(10.0*np.log10(ps))
-            # plt.pcolormesh(10.0*np.log10(ps))
-            # ax = plt.gca()
-            # ax.set_yscale('symlog')
-
-            # ax = plt.gca()
-            # ax.set_aspect('auto')
-            
-            # plt.subplot(122)
-            # specgram = specgramNoise*specgram
-            # output = stft.ispectrogram(specgram)
-            
-            # fnoise = np.fft.fft(randValues)
-            # fprecip = np.fft.fft(w)
-            
-            # # Multiply the FFT of white noise with the FFT of the Precip field
-            # fcorrNoise = fnoise*fprecip
-            # # Do the inverse FFT
-            # corrNoise = np.fft.ifft(fcorrNoise)
-            # # Get the real part
-            # outputHom = np.array(corrNoise.real)
-            
-            # print(rainfieldZeros[100,:], output, specgram)
-            # plt.plot(stats.zscore(w))
-            # plt.plot(stats.zscore(output), color='r')
-            # plt.plot(stats.zscore(outputHom), color='k')
-            # plt.show()
-            
-            # sys.exit()
             ########### Compute Fourier power spectrum ###########
             ticFFT = time.clock()
             
@@ -417,7 +371,12 @@ while timeLocal <= timeEnd:
             #fprecip = fftpack.dct(rainfieldZeros, type=2, norm='ortho')
             
             # Compute FFT
-            fprecipNoShift = np.fft.fft2(rainfieldZeros) # Numpy implementation
+            if FFTmod == 'NUMPY':
+                fprecipNoShift = np.fft.fft2(rainfieldZeros) # Numpy implementation
+            if FFTmod == 'FFTW':
+                fprecipNoShift = pyfftw.interfaces.numpy_fft.fft2(rainfieldZeros) # FFTW implementation
+                # Turn on the cache for optimum performance
+                pyfftw.interfaces.cache.enable()
             
             # Shift frequencies
             fprecip = np.fft.fftshift(fprecipNoShift)
@@ -426,9 +385,38 @@ while timeLocal <= timeEnd:
             psd2d = np.abs(fprecip)**2/(fftDomainSize*fftDomainSize)
             psd2dNoShift = np.abs(fprecipNoShift)**2/(fftDomainSize*fftDomainSize)
             
-            # Extract central region of 2d power spectrum and compute covariance
-            fftSizeSub = 40
-            psd2dsub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs = dt.compute_fft_anisotropy(psd2d, fftSizeSub)
+            # Compute autocorrelation using inverse FFT of spectrum
+            if plotSpectrum == 'autocorr':
+                DCval = psd2dNoShift[0]
+                precipVar = np.std(rainfieldZeros)
+                spectralSum = np.sum(psd2dNoShift)
+                
+                if FFTmod == 'NUMPY':
+                    autocorrNoShift = np.fft.ifft2(psd2dNoShift)
+                if FFTmod == 'FFTW':
+                    autocorrNoShift = pyfftw.interfaces.numpy_fft.ifft2(psd2dNoShift)
+                    # Turn on the cache for optimum performance
+                    pyfftw.interfaces.cache.enable()
+                
+                autocorr = np.fft.fftshift(autocorrNoShift)
+                autocorr = autocorr.real
+                
+                # Compute anisotropy from autocorrelation function
+                fftSizeSub = 200
+                autocorrSub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs,_ = dt.compute_fft_anisotropy(autocorr, fftSizeSub, percentileZero=0, rotation=False)
+            
+            if plotSpectrum == '2d':
+                # Extract central region of 2d power spectrum and compute covariance
+                cov2logPS = True # Whether to compute the anisotropy on the log of the 2d PS
+                percentileZero = 99
+                if cov2logPS:
+                    psd2d_anis = 10.0*np.log10(psd2d)
+                else:
+                    psd2d_anis = np.copy(psd2d)
+                
+                # Compute anisotropy from FFT spectrum
+                fftSizeSub = 40
+                psd2dsub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs, percZero = dt.compute_fft_anisotropy(psd2d_anis, fftSizeSub, percentileZero)
             
             # Compute 1D radially averaged power spectrum
             bin_size = 1
@@ -594,7 +582,7 @@ while timeLocal <= timeEnd:
                 plt.xlabel('Swiss easting [km]')
                 plt.ylabel('Swiss northing [km]')
                 
-                #################### PLOT SPECTRUM
+                #################### PLOT SPECTRUM ###########################################################
                 psAx = plt.subplot(122)
 
                 ### Test to generate power law noise using the observed power spectrum
@@ -628,7 +616,29 @@ while timeLocal <= timeEnd:
                     noiseIm = plt.imshow(corrNoiseReal,interpolation='nearest', cmap=cmap)
                     titleStr = str(timeLocal) + ', Power law noise'
                     cbar = plt.colorbar(noiseIm, spacing='uniform', norm=norm, extend='max', fraction=0.03)
+                
+                # Draw autocorrelation function
+                if (plotSpectrum == 'autocorr'):
+                    ext = (-fftSizeSub, fftSizeSub, -fftSizeSub, fftSizeSub)
+                    imPS = psAx.imshow(np.flipud(autocorrSub), extent = ext)
+                    cbar = plt.colorbar(imPS)
                     
+                    # Plot major and minor axis of anisotropy
+                    xbar = xbar - fftSizeSub
+                    ybar = ybar - fftSizeSub
+                    dt.plot_bars(xbar, ybar, eigvals, eigvecs, psAx)
+                    psAx.invert_yaxis()
+
+                    plt.text(0.05, 0.95, 'eccentricity = ' + str(fmt2 % eccentricity), transform=psAx.transAxes, backgroundcolor = 'w')
+                    plt.text(0.05, 0.90, 'orientation = ' + str(fmt2 % orientation) + '$^\circ$', transform=psAx.transAxes,backgroundcolor = 'w')
+                    
+                    plt.xticks(rotation=90) 
+                    plt.xlabel('Spatial lag [km]')
+                    plt.ylabel('Spatial lag [km]')
+                    titleStr = str(timeLocal) + ', 2D autocorrelation function (ifft(spectrum))'
+                    plt.title(titleStr)
+                    
+                
                 # Draw 2d power spectrum
                 if (plotSpectrum == '2d') | (plotSpectrum == '2dnoise'):
                     if fourierVar == 'rainrate':
@@ -638,8 +648,11 @@ while timeLocal <= timeEnd:
                     extentFFT = (-minFieldSize/2,minFieldSize/2,-minFieldSize/2,minFieldSize/2)
                     if (plotSpectrum == '2d'):
                         # Smooth 2d PS for plotting contours
-                        psd2dSmooth = ndimage.gaussian_filter(np.rot90(psd2d), sigma=1)
-                        psd2dSmooth = psd2dSmooth[fftDomainSize-fftSizeSub:fftDomainSize+fftSizeSub,fftDomainSize-fftSizeSub:fftDomainSize+fftSizeSub]
+                        if cov2logPS:
+                            psd2dSmooth = ndimage.gaussian_filter(psd2dsub, sigma=1)
+                        else:
+                            psd2dSmooth = ndimage.gaussian_filter(10.0*np.log10(psd2dsub), sigma=1)
+                        #psd2dSmooth = psd2dSmooth[fftDomainSize-fftSizeSub:fftDomainSize+fftSizeSub,fftDomainSize-fftSizeSub:fftDomainSize+fftSizeSub]
 
                         # Plot image of 2d PS
                         #psAx.invert_yaxis()
@@ -648,11 +661,21 @@ while timeLocal <= timeEnd:
                         cmapPS.set_over('Magenta',1)
                         normPS = colors.BoundaryNorm(clevsPS, cmap.N)
                         
-                        imPS = psAx.imshow(10*np.log10(psd2dsub), interpolation='nearest', cmap=cmapPS, norm=normPS)
+                        # Compute alpha transparency vector
+                        #cmapPS._init()
+                        #cmapPS._lut[clevsPS <= percZero,-1] = 0.5
+                        
+                        if cov2logPS:
+                            imPS = psAx.imshow(psd2dsub, interpolation='nearest', cmap=cmapPS, norm=normPS)
+                        else:
+                            imPS = psAx.imshow(10.0*np.log10(psd2dsub), interpolation='nearest', cmap=cmapPS, norm=normPS)
                         
                         # Plot smooth contour of 2d PS
-                        levelsPS = np.linspace(35,60,5)
-                        im1 = psAx.contour(10*np.log10(psd2dSmooth), levelsPS, colors='black')
+                        percentiles = [70,80,90,95,98,99,99.5]
+                        levelsPS = np.array(dt.percentiles(psd2dSmooth, percentiles))
+                        print("Contour levels quantiles: ",percentiles)
+                        print("Contour levels 2d PS    : ", levelsPS)
+                        im1 = psAx.contour(psd2dSmooth, levelsPS, colors='black')
                         
                         # Plot major and minor axis of anisotropy
                         dt.plot_bars(xbar, ybar, eigvals, eigvecs, psAx)

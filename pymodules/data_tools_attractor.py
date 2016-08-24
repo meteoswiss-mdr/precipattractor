@@ -309,7 +309,11 @@ def pol2cart(rho, phi):
     y = rho * np.sin(phi)
     return(x, y)
 
-def compute_fft_anisotropy(psd2d, fftSizeSub = 0):
+def compute_fft_anisotropy(psd2d, fftSizeSub = 0, percentileZero = 0, rotation = True):
+    ''' 
+    Function to compute the anisotropy from a 2d power spectrum or autocorrelation function
+    '''
+    
     fftSize = psd2d.shape
     
     if ((fftSize[0] % 2) != 0) or ((fftSize[1] % 2) != 0):
@@ -322,11 +326,32 @@ def compute_fft_anisotropy(psd2d, fftSizeSub = 0):
     psd2dsub = psd2d[fftMiddleY-fftSizeSub:fftMiddleY+fftSizeSub,fftMiddleX-fftSizeSub:fftMiddleX+fftSizeSub]
 
     # Rotate FFT spectrum by 90 degrees
-    psd2dsub = np.rot90(psd2dsub)
+    if rotation:
+        psd2dsub = np.rot90(psd2dsub)
+    
+    # Shift the spectrum values to make them all positive and starting from 0
+    # (avoids evaluating covariance of 0 values in the middle of the spectrum)
+    minSpectrum = np.min(psd2dsub)
+    psd2dsubPerc = -minSpectrum + psd2dsub
+        
+    # Set data below the given percentile to 0 before computing the covariance (allows focusing only on large scales)
+    if percentileZero != 0:
+        percZero = np.percentile(psd2dsubPerc, percentileZero)
+        psd2dsubPerc[psd2dsubPerc < percZero] = 0.0
+        
+        nrNonZeroPixels = np.sum(psd2dsubPerc >= percZero)
+        print("Nr non-zero pixels in spectrum for anisotropy estimation: ", nrNonZeroPixels)
+    else:
+        percZero = np.min(psd2dsubPerc)
+
+    # import matplotlib.pyplot as plt
+    # plt.imshow(psd2dsubPerc)
+    # plt.colorbar()
+    # plt.show()
     
     # Find inertial axis and covariance matrix
-    xbar, ybar, cov = intertial_axis(psd2dsub)
-
+    xbar, ybar, cov = intertial_axis(psd2dsubPerc)
+    
     # Decompose covariance matrix
     eigvals, eigvecs = np.linalg.eigh(cov)
     
@@ -335,4 +360,20 @@ def compute_fft_anisotropy(psd2d, fftSizeSub = 0):
     eccentricity = np.max(np.sqrt(eigvals))/np.min(np.sqrt(eigvals))
     orientation = np.degrees(math.atan(eigvecs[0,idxMax]/eigvecs[1,idxMax]))
     
-    return psd2dsub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs
+    # Get value of percentile by removal of the shift
+    if np.sign(minSpectrum) < 0:
+        percZero = percZero + minSpectrum
+        
+    return psd2dsub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs, percZero
+
+def percentiles(array, percentiles):
+    '''
+    Function to compute a set of quantiles from an array
+    '''
+    nrPerc = len(percentiles)
+    percentilesArray = []
+    for p in range(0,nrPerc):
+        perc = np.percentile(array,percentiles[p])
+        percentilesArray.append(perc)
+    percentilesArray = np.array(percentilesArray)
+    return(percentilesArray)
