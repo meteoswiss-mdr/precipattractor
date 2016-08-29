@@ -12,7 +12,11 @@ from statsmodels.nonparametric.api import KernelReg
 import cv2
 
 from scipy import stats
+import scipy.ndimage as ndimage
+from scipy.signal import blackman
+
 import matplotlib.colors as colors
+import matplotlib.pyplot as plt
 
 def to_dB(array, offset=0.01):
     '''
@@ -309,8 +313,11 @@ def pol2cart(rho, phi):
     x = rho * np.cos(phi)
     y = rho * np.sin(phi)
     return(x, y)
-
-def compute_fft_anisotropy(psd2d, fftSizeSub = -1, percentileZero = 0, rotation = True, radius = -1):
+    
+def GaussianKernel(v1, v2, sigma):
+    return exp(-norm(v1-v2, 2)**2/(2.*sigma**2))
+    
+def compute_fft_anisotropy(psd2d, fftSizeSub = -1, percentileZero = -1, rotation = True, radius = -1, sigma = -1):
     ''' 
     Function to compute the anisotropy from a 2d power spectrum or autocorrelation function
     '''
@@ -343,23 +350,35 @@ def compute_fft_anisotropy(psd2d, fftSizeSub = -1, percentileZero = 0, rotation 
     
     # Shift the spectrum values to make them all positive and starting from 0
     # (avoids evaluating covariance of 0 values in the middle of the spectrum)
-    minSpectrum = np.min(psd2dsub)
-    psd2dsubPerc = -minSpectrum + psd2dsub
-        
+    
+    # Smooth spectrum field if too noisy (only for anisotropy estimation)
+    if sigma > 0:
+        psd2dsubSmooth = ndimage.gaussian_filter(psd2dsub, sigma=sigma)
+        # Shift spectrum to positive vales
+        minSpectrum = np.min(psd2dsubSmooth)
+        psd2dsubPerc = -minSpectrum + psd2dsubSmooth
+    else:
+        # Shift spectrum to positive vales
+        minSpectrum = np.min(psd2dsub)
+        psd2dsubPerc = -minSpectrum + psd2dsub
+        psd2dsubSmooth = psd2dsub # just to give a return value...
+
     # Set data below the given percentile to 0 before computing the covariance (allows focusing only on large scales)
-    if percentileZero != 0:
-        percZero = np.percentile(psd2dsubPerc, percentileZero)
+    minThresholdCondition = 0.01 # threshold to compute a conditional percentile (values greater than 0 when the spectrum or ACF has many)
+    if percentileZero > 0:
+        percZero = np.percentile(psd2dsubPerc[psd2dsubPerc > minThresholdCondition], percentileZero) # conditional
         psd2dsubPerc[psd2dsubPerc < percZero] = 0.0
-        
         nrNonZeroPixels = np.sum(psd2dsubPerc >= percZero)
         print("Nr non-zero pixels in spectrum for anisotropy estimation: ", nrNonZeroPixels)
     else:
         percZero = np.min(psd2dsubPerc)
     
     # Apply opening operator to remove small regions
-    # kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(35,35))
-    # psd2dsubPerc = cv2.morphologyEx(psd2dsubPerc, cv2.MORPH_OPEN, kernel)
-
+    # kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(75,75))
+    
+    # mask = cv2.morphologyEx((psd2dsubPerc > 0).astype(float), cv2.MORPH_OPEN, kernel)
+    # psd2dsubPerc = psd2dsubPerc*mask
+    
     # import matplotlib.pyplot as plt
     # plt.imshow(psd2dsubPerc)
     # plt.colorbar()
@@ -377,11 +396,53 @@ def compute_fft_anisotropy(psd2d, fftSizeSub = -1, percentileZero = 0, rotation 
     orientation = np.degrees(math.atan(eigvecs[0,idxMax]/eigvecs[1,idxMax]))
     
     # Get value of percentile by removal of the shift
-    if np.sign(minSpectrum) < 0:
-        percZero = percZero + minSpectrum
+    percZero = percZero + minSpectrum
         
-    return psd2dsub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs, percZero
+    return psd2dsub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs, percZero, psd2dsubSmooth
 
+def compute_autocorrelation_fft(imageArray, FFTmod = 'NUMPY'):
+    '''
+    This function computes the autocorrelation of an image using the FFT.
+    It exploits the Wiener-Khinchin theorem, which states that the Fourier transform of the auto-correlation function   
+    is equal to the Fourier transform of the signal. Thus, the autocorrelation function can be obtained as the inverse transform of
+    the power spectrum.
+    It is very important to know that the auto-correlation function, as it is referred to as in the literature, is in fact the noncentred
+    autocovariance. In order to obtain values of correlation between -1 and 1, one must center the signal by removing the mean before
+    computing the FFT and then divide the obtained auto-correlation (after inverse transform) by the variance of the signal.
+    '''
+    # Compute field mean and variance
+    field_mean = np.mean(imageArray)
+    field_var = np.var(imageArray)
+    field_dim = imageArray.shape
+    
+    # Compute FFT
+    if FFTmod == 'NUMPY':
+        fourier = np.fft.fft2(imageArray - field_mean) # Numpy implementation
+    if FFTmod == 'FFTW':
+        fourier = pyfftw.interfaces.numpy_fft.fft2(imageArray - field_mean) # FFTW implementation
+        # Turn on the cache for optimum performance
+        pyfftw.interfaces.cache.enable()
+    
+    # Compute power spectrum
+    powerSpectrum = np.abs(fourier)**2/(field_dim[0]*field_dim[1])
+    
+    # Compute inverse FFT of spectrum
+    if FFTmod == 'NUMPY':
+        autocovariance = np.fft.ifft2(powerSpectrum) # Numpy implementation
+    if FFTmod == 'FFTW':
+        autocovariance = pyfftw.interfaces.numpy_fft.ifft2(powerSpectrum) # FFTW implementation
+        # Turn on the cache for optimum performance
+        pyfftw.interfaces.cache.enable()
+    
+    # Compute auto-correlation from auto-covariance
+    autocorrelation = autocovariance.real/field_var
+    
+    # Shift autocorrelation function and spectrum to have 0 lag/frequency in the center
+    autocorrelation_shifted = np.fft.fftshift(autocorrelation)
+    powerSpectrum_shifted = np.fft.fftshift(powerSpectrum) # Add back mean to spectrum??
+    
+    return(autocorrelation_shifted, powerSpectrum_shifted)
+    
 def percentiles(array, percentiles):
     '''
     Function to compute a set of quantiles from an array

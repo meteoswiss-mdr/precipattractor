@@ -9,7 +9,7 @@ import argparse
 from PIL import Image
 
 import matplotlib as mpl
-mpl.use('Agg')
+#mpl.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import matplotlib.image as mpimg
@@ -26,6 +26,7 @@ import cv2
 
 import pyfftw
 from scipy import fftpack,stats
+import scipy.signal as ss
 import scipy.ndimage as ndimage
 
 import getpass
@@ -58,6 +59,7 @@ plotSpectrum = '1d' #'1d', '2d', '1dnoise','2dnoise' or 'noise field'
 fftDomainSize = 512
 weightedOLS = 1
 FFTmod = 'NUMPY' # 'FFTW' or 'NUMPY'
+windowFunction = 'none' #'blackman' or 'none'
 
 ########GET ARGUMENTS FROM CMD LINE####
 parser = argparse.ArgumentParser(description='Compute radar rainfall field statistics.')
@@ -370,11 +372,18 @@ while timeLocal <= timeEnd:
             # Discrete Cosine Transform (useful representation of the data for PS estimation?)
             #fprecip = fftpack.dct(rainfieldZeros, type=2, norm='ortho')
             
+            # Generate a window function
+            if windowFunction == 'blackman':
+                w = ss.blackman(fftDomainSize)
+                window = np.outer(w,w)
+            else:
+                window = np.ones((fftDomainSize,fftDomainSize))
+
             # Compute FFT
             if FFTmod == 'NUMPY':
-                fprecipNoShift = np.fft.fft2(rainfieldZeros) # Numpy implementation
+                fprecipNoShift = np.fft.fft2(rainfieldZeros*window) # Numpy implementation
             if FFTmod == 'FFTW':
-                fprecipNoShift = pyfftw.interfaces.numpy_fft.fft2(rainfieldZeros) # FFTW implementation
+                fprecipNoShift = pyfftw.interfaces.numpy_fft.fft2(rainfieldZeros*window) # FFTW implementation
                 # Turn on the cache for optimum performance
                 pyfftw.interfaces.cache.enable()
             
@@ -387,26 +396,25 @@ while timeLocal <= timeEnd:
             
             # Compute autocorrelation using inverse FFT of spectrum
             if plotSpectrum == 'autocorr' or plotSpectrum == '1d':
-                DCval = psd2dNoShift[0]
-                precipVar = np.std(rainfieldZeros)
-                spectralSum = np.sum(psd2dNoShift)
-                
-                if FFTmod == 'NUMPY':
-                    autocorrNoShift = np.fft.ifft2(psd2dNoShift)
-                if FFTmod == 'FFTW':
-                    autocorrNoShift = pyfftw.interfaces.numpy_fft.ifft2(psd2dNoShift)
-                    # Turn on the cache for optimum performance
-                    pyfftw.interfaces.cache.enable()
-                
-                autocorr = np.fft.fftshift(autocorrNoShift)
-                autocorr = autocorr.real
+                # Compute autocorrelation
+                autocorr,_ = dt.compute_autocorrelation_fft(rainfieldZeros*window, FFTmod = 'NUMPY')
                 
                 # Compute anisotropy from autocorrelation function
                 fftSizeSub = 255
-                percentileZero = 75
-                radius = 100
-                autocorrSub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs, percZero = dt.compute_fft_anisotropy(autocorr, fftSizeSub, percentileZero, rotation=False, radius=radius)
-            
+                percentileZero = 90
+                radius = -1
+                autocorrSub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs, percZero,_ = dt.compute_fft_anisotropy(autocorr, fftSizeSub, percentileZero, rotation=False, radius=radius)
+
+                # Test to recompute 2d spectrum from autocorr function
+                # autocorrNoShift = np.fft.fft2(autocorrSub)
+                # autocorr = np.fft.fftshift(autocorrNoShift)
+                # psd2d = np.abs(autocorr)**2/(fftDomainSize*fftDomainSize)
+                # print(10.0*np.log10(psd2d))
+                # plt.imshow(autocorrSub)
+                # plt.show()
+                # plt.imshow(10.0*np.log10(psd2d))
+                # plt.show()
+                # sys.exit()
             if plotSpectrum == '2d' or plotSpectrum == '1d':
                 # Extract central region of 2d power spectrum and compute covariance
                 cov2logPS = True # Whether to compute the anisotropy on the log of the 2d PS
@@ -417,9 +425,11 @@ while timeLocal <= timeEnd:
                 
                 # Compute anisotropy from FFT spectrum
                 fftSizeSub = 40
-                percentileZero = 99
-                psd2dsub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs, percZero = dt.compute_fft_anisotropy(psd2d_anis, fftSizeSub, percentileZero)
+                percentileZero = 90
+                smoothing_sigma = 3
+                psd2dsub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs, percZero, psd2dsubSmooth = dt.compute_fft_anisotropy(psd2d_anis, fftSizeSub, percentileZero, sigma = smoothing_sigma)
             
+            print(percentileZero,'- percentile = ', percZero)
             # Compute 1D radially averaged power spectrum
             bin_size = 1
             nr_pixels, bin_centers, psd1d = radialprofile.azimuthalAverage(psd2d, binsize=bin_size, return_nr=True)
@@ -502,13 +512,42 @@ while timeLocal <= timeEnd:
 
             print("Best scaling break = ", scalingBreak_best, ' km')
             
-            # Compute betas using splines
+            # # Test for computing betas with GLM
+            #import statsmodels.api as sm
+            #segmentsEndog = 10*np.log10(psd1d[idxBetaBoth])#np.column_stack([10*np.log10(psd1d[idxBeta1]),10*np.log10(psd1d[idxBeta2])]) 
+            # #segmentsExog = np.column_stack((10*np.log10(freq[idxBeta1]),10*np.log10(freq[idxBeta2])))
+            # breaks = [10.0*np.log10(1/256), 10.0*np.log10(1/15), 10.0*np.log10(1/3)]  # 0 adds slope for entire array 
+            # segmentsExog = np.column_stack([np.maximum(0, 10*np.log10(freq[idxBetaBoth]) - knot) for knot in breaks]) 
+            # result = sm.WLS(segmentsEndog, segmentsExog).fit()
+
+            # # print(result.params)
+            # # print(result.summary())
+
+            # nsample = len(psd1d[idxBetaBoth])
+            # groups = np.zeros(nsample, int)
+            # groups[20:40] = 1
+            # groups[40:] = 2
+            # dummy = (groups[:,None] == np.unique(groups)).astype(float)
+            # dummy = sm.categorical(groups, drop=True)
+            # X = np.column_stack((10.0*np.log10(freq[idxBetaBoth]), dummy))
+            # #print(X,segmentsEndog)
+            # res = sm.OLS(segmentsEndog, X).fit()
+            # #print(res.summary())
+            # prstd, iv_l, iv_u = sm.wls_prediction_std(res)
+            # sys.exit()
+            
+            # from sklearn import linear_model
+            # clf = linear_model.LassoLars(alpha=.1)
+            # clf.fit(10.0*np.log10(freq[idxBetaBoth]).reshape(-1, 1),10.0*np.log10(psd1d[idxBetaBoth]).reshape(-1, 1))  
+            # print(clf.coef_)
+            
+            # sys.exit()
             # from scipy import interpolate,optimize
             # def piecewise_linear(x, x0, y0, k1, k2):
                 # return np.piecewise(x, [x < x0], [lambda x:k1*x + y0-k1*x0, lambda x:k2*x + y0-k2*x0])
             # p,e = optimize.curve_fit(piecewise_linear, 10*np.log10(freq[1:-10]), 10*np.log10(psd1d[1:-10]))
             # print(p,e)
-            
+            # sys.exit()
             # tck = interpolate.splrep(10*np.log10(freq[idxBetaBoth]), 10*np.log10(psd1d[idxBetaBoth]), k=3, s=0)
             # dev_2 = interpolate.splev(10*np.log10(freq[idxBetaBoth]), tck, der=2)
             # turning_point_mask = dev_2 == np.amax(dev_2)
@@ -670,24 +709,18 @@ while timeLocal <= timeEnd:
                         clevsPS = np.arange(0,50,5)
                     else:
                         clevsPS = np.arange(0,10,0.5)
+                        clevsPS = np.arange(0,1.05,0.05)
                     cmapPS = plt.get_cmap('nipy_spectral', clevsPS.shape[0]) #nipy_spectral, gist_ncar
                     normPS = colors.BoundaryNorm(clevsPS, cmapPS.N)
-                    cmapPS.set_over('white',1)
+                    #cmapPS.set_over('white',1)
                         
                     ext = (-fftSizeSub, fftSizeSub, -fftSizeSub, fftSizeSub)
                     imPS = psAx.imshow(np.flipud(autocorrSub), cmap = cmapPS, norm=normPS, extent = ext)
-                    cbar = plt.colorbar(imPS, ticks=clevsPS, spacing='uniform', norm=normPS, extend='max', fraction=0.03)
+                    #cbar = plt.colorbar(imPS, ticks=clevsPS, spacing='uniform', norm=normPS, extend='max', fraction=0.03)
+                    cbar = plt.colorbar(imPS, ticks=clevsPS, spacing='uniform', norm=normPS,fraction=0.03)
                     
-                    percentiles = [70,80,90,95,98,99,99.5]
-                    levelsPS = np.array(dt.percentiles(autocorrSub, percentiles))
-                    argNonZero = np.nonzero(levelsPS)
-                    
-                    levelsPS = levelsPS[argNonZero]
-                    print("Contour levels quantiles: ",percentiles)
-                    print("Contour levels 2d PS    : ", levelsPS)
-                    if np.sum(levelsPS) != 0:
-                        im1 = psAx.contour(autocorrSub, levelsPS, colors='black', alpha = 0.5, extent = ext)
-                        im1 = psAx.contour(autocorrSub, [percZero], colors='black', extent = ext)
+                    im1 = psAx.contour(autocorrSub, clevsPS, colors='black', alpha = 0.25, extent = ext)
+                    im1 = psAx.contour(autocorrSub, [percZero], colors='black', linestyles='dashed', extent = ext)
                     
                     # Plot major and minor axis of anisotropy
                     xbar = xbar - fftSizeSub
@@ -703,7 +736,6 @@ while timeLocal <= timeEnd:
                     plt.ylabel('Spatial lag [km]')
                     titleStr = str(timeLocal) + ', 2D autocorrelation function (ifft(spectrum))'
                     plt.title(titleStr)
-                    
                 
                 # Draw 2d power spectrum
                 if (plotSpectrum == '2d') | (plotSpectrum == '2dnoise'):
@@ -714,11 +746,8 @@ while timeLocal <= timeEnd:
                     extentFFT = (-minFieldSize/2,minFieldSize/2,-minFieldSize/2,minFieldSize/2)
                     if (plotSpectrum == '2d'):
                         # Smooth 2d PS for plotting contours
-                        if cov2logPS:
-                            psd2dSmooth = ndimage.gaussian_filter(psd2dsub, sigma=1)
-                        else:
-                            psd2dSmooth = ndimage.gaussian_filter(10.0*np.log10(psd2dsub), sigma=1)
-                        #psd2dSmooth = psd2dSmooth[fftDomainSize-fftSizeSub:fftDomainSize+fftSizeSub,fftDomainSize-fftSizeSub:fftDomainSize+fftSizeSub]
+                        if cov2logPS == False:
+                            psd2dsubSmooth = 10.0*np.log10(psd2dsubSmooth)
 
                         # Plot image of 2d PS
                         #psAx.invert_yaxis()
@@ -738,12 +767,12 @@ while timeLocal <= timeEnd:
                         
                         # Plot smooth contour of 2d PS
                         percentiles = [70,80,90,95,98,99,99.5]
-                        levelsPS = np.array(dt.percentiles(psd2dSmooth, percentiles))
+                        levelsPS = np.array(dt.percentiles(psd2dsubSmooth, percentiles))
                         print("Contour levels quantiles: ",percentiles)
                         print("Contour levels 2d PS    : ", levelsPS)
                         if np.sum(levelsPS) != 0:
-                            im1 = psAx.contour(psd2dSmooth, levelsPS, colors='black', alpha=0.5)
-                            im1 = psAx.contour(psd2dSmooth, [percZero], colors='black')
+                            im1 = psAx.contour(psd2dsubSmooth, levelsPS, colors='black', alpha=0.25)
+                            im1 = psAx.contour(psd2dsubSmooth, [percZero], colors='black', linestyles='dashed')
                         
                         # Plot major and minor axis of anisotropy
                         dt.plot_bars(xbar, ybar, eigvals, eigvecs, psAx, 'red')
