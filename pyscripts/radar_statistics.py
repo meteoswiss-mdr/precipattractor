@@ -9,7 +9,7 @@ import argparse
 from PIL import Image
 
 import matplotlib as mpl
-#mpl.use('Agg')
+mpl.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import matplotlib.image as mpimg
@@ -401,7 +401,7 @@ while timeLocal <= timeEnd:
                 
                 # Compute anisotropy from autocorrelation function
                 fftSizeSub = 255
-                percentileZero = 90
+                percentileZero = 75
                 radius = -1
                 autocorrSub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs, percZero,_ = dt.compute_fft_anisotropy(autocorr, fftSizeSub, percentileZero, rotation=False, radius=radius)
 
@@ -712,8 +712,14 @@ while timeLocal <= timeEnd:
                         clevsPS = np.arange(0,1.05,0.05)
                     cmapPS = plt.get_cmap('nipy_spectral', clevsPS.shape[0]) #nipy_spectral, gist_ncar
                     normPS = colors.BoundaryNorm(clevsPS, cmapPS.N)
+                    cmaplist = [cmapPS(i) for i in range(cmapPS.N)]
+                    # force the first color entry to be white
+                    cmaplist[0] = (1,1,1,1.0)
+                    # Create the new map
+                    cmapPS = cmapPS.from_list('Custom cmap', cmaplist, cmapPS.N)
+
                     #cmapPS.set_over('white',1)
-                        
+                    
                     ext = (-fftSizeSub, fftSizeSub, -fftSizeSub, fftSizeSub)
                     imPS = psAx.imshow(np.flipud(autocorrSub), cmap = cmapPS, norm=normPS, extent = ext)
                     #cbar = plt.colorbar(imPS, ticks=clevsPS, spacing='uniform', norm=normPS, extend='max', fraction=0.03)

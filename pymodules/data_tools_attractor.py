@@ -1,4 +1,14 @@
 #!/usr/bin/env python
+'''
+Module to perform various data operations and statistics
+(anisotropy estimation, rainfall-reflectivity conversion, spectral slope computation, WAR statistics, etc).
+
+Documentation convention from https://github.com/numpy/numpy/blob/master/doc/HOWTO_DOCUMENT.rst.txt
+
+30.08.2016
+Loris Foresti
+'''
+
 from __future__ import division
 from __future__ import print_function
 
@@ -14,6 +24,7 @@ import cv2
 from scipy import stats
 import scipy.ndimage as ndimage
 from scipy.signal import blackman
+from skimage import measure
 
 import matplotlib.colors as colors
 import matplotlib.pyplot as plt
@@ -319,8 +330,46 @@ def GaussianKernel(v1, v2, sigma):
     
 def compute_fft_anisotropy(psd2d, fftSizeSub = -1, percentileZero = -1, rotation = True, radius = -1, sigma = -1):
     ''' 
-    Function to compute the anisotropy from a 2d power spectrum or autocorrelation function
+    Function to compute the anisotropy from a 2d power spectrum or autocorrelation function.
+    
+    Parameters
+    ----------
+    psd2d : numpyarray(float)
+        Input 2d array with the autocorrelation function or the power spectrum
+    fftSizeSub : int
+        Half-size of the sub-domain to extract to zoom in (maximum = psd2d.size[0]/2)
+    percentileZero : int
+        Percentile to use to shift the autocorrelation/spectrum to 0. Values below the percentile will be set to 0.
+    rotation : bool
+        Whether to rotate the spectrum (Fourier spectrum needs a 90 degrees rotation w.r.t autocorrelation)
+    radius : int
+        Radius in pixels from the center to mask the data (not needed if using the percentile criterion)
+    sigma : float
+        Bandwidth of the Gaussian kernel used to smooth the 2d spectrum (not needed for the autocorrelation function, already smooth)
+    
+    Returns
+    -------
+    psd2dsub : numpyarray(float)
+        Output 2d array with the autocorrelation/spectrum selected on the subdomain (and rotated if asked)
+    eccentricity : float
+        Eccentricity of the anisotropy (major/minor axis)
+    orientation : float
+        Orientation of the anisotropy (degrees using trigonometrical convention, 0 degrees -> East, 90 degrees -> North, 180 degrees -> West)
+    xbar : float
+        X-coordinate of the center of the intertial axis of anisotropy (pixels)
+    ybar : float
+        Y-coordinate of the center of the intertial axis of anisotropy (pixels)
+    eigvals : numpyarray(float)
+        Eigenvalues obtained after decomposition of covariance matrix using selected values of spectrum/autocorrelation
+    eigvecs : numpyarray(float)
+        Eigenvectors obtained after decomposition of covariance matrix using selected values of spectrum/autocorrelation
+    percZero : float
+        Value of the autocorrelation/spectrum corresponding to the asked percentile (percentileZero)
+    psd2dsubSmooth: numpyarray(float)
+        Output 2d array with the smoothed autocorrelation/spectrum selected on the subdomain (and rotated if asked)
     '''
+    
+    # Get dimensions of the large and subdomain
     if fftSizeSub == -1:
         fftSizeSub = psd2d.shape[0]
     
@@ -332,10 +381,11 @@ def compute_fft_anisotropy(psd2d, fftSizeSub = -1, percentileZero = -1, rotation
     fftMiddleX = fftSize[1]/2
     fftMiddleY = fftSize[0]/2
     
-    # Select subset of spectrum
+    # Select subset of autocorrelation/spectrum
     psd2dsub = psd2d[fftMiddleY-fftSizeSub:fftMiddleY+fftSizeSub,fftMiddleX-fftSizeSub:fftMiddleX+fftSizeSub]
 
-    # Apply circular mask
+    ############### CIRCULAR MASK
+    # Apply circular mask from the center as mask (not advised as it will often yield a circular anisotropy, in particular if the radisu is small)
     if radius != -1:
         # Create circular mask
         y,x = np.ogrid[-fftSizeSub:fftSizeSub, -fftSizeSub:fftSizeSub]
@@ -344,59 +394,58 @@ def compute_fft_anisotropy(psd2d, fftSizeSub = -1, percentileZero = -1, rotation
         # Apply mask to 2d spectrum
         psd2dsub[~mask] = 0.0
     
+    ############### ROTATION
     # Rotate FFT spectrum by 90 degrees
     if rotation:
         psd2dsub = np.rot90(psd2dsub)
-    
-    # Shift the spectrum values to make them all positive and starting from 0
-    # (avoids evaluating covariance of 0 values in the middle of the spectrum)
-    
-    # Smooth spectrum field if too noisy (only for anisotropy estimation)
+
+    ############### SMOOTHING
+    # Smooth spectrum field if too noisy (to help the anisotropy estimation)
     if sigma > 0:
         psd2dsubSmooth = ndimage.gaussian_filter(psd2dsub, sigma=sigma)
-        # Shift spectrum to positive vales
-        minSpectrum = np.min(psd2dsubSmooth)
-        psd2dsubPerc = -minSpectrum + psd2dsubSmooth
     else:
-        # Shift spectrum to positive vales
-        minSpectrum = np.min(psd2dsub)
-        psd2dsubPerc = -minSpectrum + psd2dsub
         psd2dsubSmooth = psd2dsub # just to give a return value...
-
-    # Set data below the given percentile to 0 before computing the covariance (allows focusing only on large scales)
-    minThresholdCondition = 0.01 # threshold to compute a conditional percentile (values greater than 0 when the spectrum or ACF has many)
+    
+    ############### SHIFT ACCORDING TO PERCENTILE
+    # Compute conditional percentile on smoothed spectrum/autocorrelation
+    minThresholdCondition = 0.01 # Threshold to compute to conditional percentile (only values greater than this)
     if percentileZero > 0:
-        percZero = np.percentile(psd2dsubPerc[psd2dsubPerc > minThresholdCondition], percentileZero) # conditional
-        psd2dsubPerc[psd2dsubPerc < percZero] = 0.0
-        nrNonZeroPixels = np.sum(psd2dsubPerc >= percZero)
-        print("Nr non-zero pixels in spectrum for anisotropy estimation: ", nrNonZeroPixels)
+        percZero = np.percentile(psd2dsubSmooth[psd2dsubSmooth > minThresholdCondition], percentileZero)
     else:
-        percZero = np.min(psd2dsubPerc)
+        percZero = np.min(psd2dsubSmooth)
     
-    # Apply opening operator to remove small regions
-    # kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(75,75))
+    # Shift spectrum/autocorrelation to start from 0 (zeros will be automatocally neglected in the computation of covariance)
+    psd2dsubSmoothShifted = psd2dsubSmooth - percZero
+    psd2dsubSmoothShifted[psd2dsubSmoothShifted < 0] = 0.0
     
-    # mask = cv2.morphologyEx((psd2dsubPerc > 0).astype(float), cv2.MORPH_OPEN, kernel)
-    # psd2dsubPerc = psd2dsubPerc*mask
+    ############### IMAGE SEGMENTATION
+    # Image segmentation to remove high autocorrelations/spectrum values at far ranges/high frequencies
+    psd2dsubSmoothShifted_bin = np.uint8(psd2dsubSmoothShifted > minThresholdCondition)
     
-    # import matplotlib.pyplot as plt
-    # plt.imshow(psd2dsubPerc)
-    # plt.colorbar()
-    # plt.show()
+    # Compute image segmentation
+    labelsImage = measure.label(psd2dsubSmoothShifted_bin, background = 0)
     
+    # Get label of center of autocorrelation function (corr = 1.0)
+    labelCenter = labelsImage[labelsImage.shape[0]/2,labelsImage.shape[1]/2]
+    
+    # Compute mask to keep only central polygon
+    mask = (labelsImage == labelCenter).astype(int)
+    
+    nrNonZeroPixels = np.sum(mask)
+    print("Nr. central pixels used for anisotropy estimation: ", nrNonZeroPixels)
+    
+    ############### COVARIANCE DECOMPOSITION
     # Find inertial axis and covariance matrix
-    xbar, ybar, cov = intertial_axis(psd2dsubPerc)
+    xbar, ybar, cov = intertial_axis(psd2dsubSmoothShifted*mask)
     
     # Decompose covariance matrix
     eigvals, eigvecs = np.linalg.eigh(cov)
     
+    ############### ECCENTRICITY/ORIENTATION
     # Compute eccentricity and orientation of anisotropy
     idxMax = np.argmin(eigvals)
     eccentricity = np.max(np.sqrt(eigvals))/np.min(np.sqrt(eigvals))
     orientation = np.degrees(math.atan(eigvecs[0,idxMax]/eigvecs[1,idxMax]))
-    
-    # Get value of percentile by removal of the shift
-    percZero = percZero + minSpectrum
         
     return psd2dsub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs, percZero, psd2dsubSmooth
 
