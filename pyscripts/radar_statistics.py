@@ -4,7 +4,6 @@ from __future__ import print_function
 
 import os
 import sys
-import fnmatch
 import argparse
 from PIL import Image
 
@@ -12,17 +11,13 @@ import matplotlib as mpl
 mpl.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
-import matplotlib.image as mpimg
 import pylab
 
-import math
 import numpy as np
-import csv
 import shutil
 import datetime
 import time
 import warnings
-import cv2
 
 import pyfftw
 from scipy import fftpack,stats
@@ -66,7 +61,6 @@ parser = argparse.ArgumentParser(description='Compute radar rainfall field stati
 parser.add_argument('-start', default='201601310600', type=str,help='Starting date YYYYMMDDHHmmSS.')
 parser.add_argument('-end', default='201601310600', type=str,help='Ending date YYYYMMDDHHmmSS.')
 parser.add_argument('-product', default='AQC', type=str,help='Which radar rainfall product to use (AQC, CPC, etc).')
-parser.add_argument('-flow', default=0, type=int,help='Whether to compute the optical flow.')
 parser.add_argument('-plot', default=0, type=int,help='Whether to plot the rainfall fields and the power spectra.')
 parser.add_argument('-plt', default='1d', type=str,help='Type of plot on the side of the precipitation field (1d, 2d, 1dnoise, 2dnoise or noise field).')
 parser.add_argument('-wols', default=0, type=int,help='Whether to use the weighted ordinary leas squares or not in the fitting of the power spectrum.')
@@ -288,7 +282,7 @@ while timeLocal <= timeEnd:
             dBZC[condition] = np.nan
             dBZ[condition] = np.nan
             
-            # Replaze NaNs with zeros for Fourier and optical flow
+            # Replaze NaNs with zeros for Fourier transform
             if (fourierVar == 'rainrate'):
                 rainfieldZeros = rainrate.copy()
             elif (fourierVar == 'dbz'):
@@ -298,72 +292,6 @@ while timeLocal <= timeEnd:
                 sys.exit()
             
             rainfieldZeros[rainfieldZeros == noData] = 0.0 # set 0 dBZ for zeros???
-            
-            # Load image with openCV library
-            # img = cv2.imread(fileName,0)
-            # print(img)
-            
-            # prepare rainfield OF
-            rainOF = np.copy(rain8bit)
-            rainOF[rainOF == 255] = 0
-            # rainOF = rainOF/float(np.max(rainOF))*255.0
-            # rainOF = rainOF.astype(int)
-            
-            # Move rainfall field down the stack
-            nrValidFields = nrValidFields + 1
-            rainfallStack[1,:,:] = rainfallStack[0,:]
-            rainfallStack[0,:,:] = rainOF # rainfieldZeros or rain8bit 
-            
-            ########### Compute optical flow
-            OFmethod = 'Farneback' #'Farneback' or 'LK'
-
-            if nrValidFields >= 2:
-                prvs = rainfallStack[1,:,:]
-                next = rainfallStack[0,:,:]
-                
-                # prvs_gray = prvs.astype(np.uint8)
-                # prvs = cv2.cvtColor(prvs_gray, cv2.COLOR_RGB2GRAY)
-                # next_gray = prvs.astype(np.uint8)
-                # next = cv2.cvtColor(next_gray, cv2.COLOR_RGB2GRAY)
-                
-                # prvs = cv2.cv.fromarray(prvs)
-                # next = cv2.cv.fromarray(next)
-                
-                if (args.flow == 1):
-                    print("Computing optical flow...")
-                    ticOF = time.clock()
-                    if (OFmethod == 'Farneback'):
-                        # Farneback parameters
-                        pyr_scale = 0.5
-                        levels = 1
-                        winsize = 25 # 3
-                        iterations = 15
-                        poly_n = 5
-                        poly_sigma = 1.1
-                        flags = 1
-                        # Compute flow
-                        flow = cv2.calcOpticalFlowFarneback(prvs, next, pyr_scale, levels, winsize, iterations, poly_n, poly_sigma, flags)
-                        #sigma = 5
-                        #dt.smooth_extrapolate_velocity_field(flow[:,:,0],flow[:,:,1], prvs, next, sigma)
-                        #sys.exit(1)
-                    elif (OFmethod == 'LK'):
-                        # Locations to estimate flow
-                        xSub, ySub = dt.create_sparse_grid(10, fftDomainSize, fftDomainSize)
-                        oldPositions = np.array([xSub, ySub], dtype=float).T
-                        newPositions = np.zeros((len(xSub),2), dtype=float)
-                        
-                        #prvs = cv2.cvtColor(rainfallStack[1,:,:], cv2.COLOR_RGB2GRAY)
-                        #next = cv2.cvtColor(rainfallStack[0,:,:], cv2.COLOR_RGB2GRAY)
-                        
-                        # Lukas-Kanade parameters
-                        feature_params = dict( maxCorners = 100, qualityLevel = 0.3, minDistance = 7, blockSize = 7 )
-                        p0 = cv2.goodFeaturesToTrack(prvs, mask = None, **feature_params)
-                        lk_params = dict(winSize  = (15,15), maxLevel = 2, criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
-                        # Compute flow
-                        flow, st, err = cv2.calcOpticalFlowPyrLK(prvs, next, p0, None, **lk_params)
-                    
-                    tocOF = time.clock()
-                    print('OF time: ', tocOF-ticOF, ' seconds.')
             
             ########### Compute Fourier power spectrum ###########
             ticFFT = time.clock()
@@ -592,47 +520,7 @@ while timeLocal <= timeEnd:
                 
                 # Draw shapefile
                 gis.read_plot_shapefile(fileNameShapefile, proj4stringWGS84, proj4stringCH,  ax = rainAx, linewidth = 0.75)
-                
-                # Draw optical flow field
-                if (args.flow == 1) & (nrValidFields >= 2):
-                    u = flow[:,:,0]
-                    v = flow[:,:,1]
-                    # reduce density of arrows for plotting
-                    uSub = []
-                    vSub = []
-                    xSub = []
-                    ySub = []
-                    gridSpacing = 10
-                    for i in range(0,fftDomainSize):
-                        for j in range(0,fftDomainSize):
-                            if ((i % gridSpacing) == 0) & ((j % gridSpacing) == 0):
-                                uSub.append(u[i,j])
-                                vSub.append(v[i,j])
-                                xSub.append(subXcoords[j])
-                                ySub.append(subYcoords[fftDomainSize - 1 - i])
-                                
-                    uSub = np.asarray(uSub)
-                    vSub = np.asarray(vSub)
-                    
-                    # Draw arrows
-                    Q = rainAx.quiver(xSub, ySub, uSub, -vSub, angles='xy', scale_units='xy')#, scale=5)
-                    
-                    # plot vector key
-                    keyLength = 4
-                    qk = rainAx.quiverkey(Q, 1.08, 1, keyLength, r'$x \frac{km}{h}$', \
-                    labelpos='E', coordinates='axes') #, fontproperties={'weight': 'bold'})
-                    
-                    # Write method and parameters
-                    txt = 'OF method = ' + OFmethod
-                    yoffset = 1.0
-                    xoffset = -0.3
-                    spacing = 0.03
-                    rainAx.text(xoffset,yoffset, txt, transform=rainAx.transAxes, color='b', fontsize=10)
-                    rainAx.text(xoffset,yoffset-spacing, "pyr_scale = " + str(pyr_scale), transform=rainAx.transAxes, color='b', fontsize=10)
-                    rainAx.text(xoffset,yoffset-2*spacing, "levels = " + str(levels), transform=rainAx.transAxes, color='b', fontsize=10)
-                    rainAx.text(xoffset,yoffset-3*spacing, "winsize = " + str(winsize), transform=rainAx.transAxes, color='b', fontsize=10)
-                    rainAx.text(xoffset,yoffset-4*spacing, "poly_n = " + str(poly_n), transform=rainAx.transAxes, color='b', fontsize=10)
-                    rainAx.text(xoffset,yoffset-5*spacing, "poly_sigma = " + str(poly_sigma), transform=rainAx.transAxes, color='b', fontsize=10)
+
                 # Colorbar
                 cbar = plt.colorbar(rainIm, ticks=clevs, spacing='uniform', norm=norm, extend='max', fraction=0.03)
                 cbar.set_ticklabels(clevsStr, update_ticks=True)
@@ -954,7 +842,7 @@ while timeLocal <= timeEnd:
             print(instantStats)
             dailyStats.append(instantStats)
         else:
-            nrValidFields = 0 # Reset to 0 the number of valid fields for optical flow
+            nrValidFields = 0 # Reset to 0 the number of valid fields with consecutive rainfall
             print('Not enough rain to compute statistics')
 
     # Write out daily stats
