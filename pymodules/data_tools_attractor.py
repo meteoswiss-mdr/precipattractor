@@ -328,7 +328,7 @@ def pol2cart(rho, phi):
 def GaussianKernel(v1, v2, sigma):
     return exp(-norm(v1-v2, 2)**2/(2.*sigma**2))
     
-def compute_fft_anisotropy(psd2d, fftSizeSub = -1, percentileZero = -1, rotation = True, radius = -1, sigma = -1):
+def compute_fft_anisotropy(psd2d, fftSizeSub = -1, percentileZero = -1, rotation = True, radius = -1, sigma = -1, verbose = 0):
     ''' 
     Function to compute the anisotropy from a 2d power spectrum or autocorrelation function.
     
@@ -346,13 +346,15 @@ def compute_fft_anisotropy(psd2d, fftSizeSub = -1, percentileZero = -1, rotation
         Radius in pixels from the center to mask the data (not needed if using the percentile criterion)
     sigma : float
         Bandwidth of the Gaussian kernel used to smooth the 2d spectrum (not needed for the autocorrelation function, already smooth)
+    verbose: int
+        Verbosity level to use (0: nothing is printed)
     
     Returns
     -------
     psd2dsub : numpyarray(float)
         Output 2d array with the autocorrelation/spectrum selected on the subdomain (and rotated if asked)
     eccentricity : float
-        Eccentricity of the anisotropy (major/minor axis)
+        Eccentricity of the anisotropy (sqrt(1-eigval_max/eigval_min)) in range 0-1
     orientation : float
         Orientation of the anisotropy (degrees using trigonometrical convention, 0 degrees -> East, 90 degrees -> North, 180 degrees -> West)
     xbar : float
@@ -371,7 +373,7 @@ def compute_fft_anisotropy(psd2d, fftSizeSub = -1, percentileZero = -1, rotation
     
     # Get dimensions of the large and subdomain
     if fftSizeSub == -1:
-        fftSizeSub = psd2d.shape[0]
+        fftSizeSub = psd2d.shape[0]/2
     
     fftSize = psd2d.shape
     
@@ -432,7 +434,8 @@ def compute_fft_anisotropy(psd2d, fftSizeSub = -1, percentileZero = -1, rotation
     mask = (labelsImage == labelCenter).astype(int)
     
     nrNonZeroPixels = np.sum(mask)
-    print("Nr. central pixels used for anisotropy estimation: ", nrNonZeroPixels)
+    if verbose == 1:
+        print("Nr. central pixels used for anisotropy estimation: ", nrNonZeroPixels)
     
     ############### COVARIANCE DECOMPOSITION
     # Find inertial axis and covariance matrix
