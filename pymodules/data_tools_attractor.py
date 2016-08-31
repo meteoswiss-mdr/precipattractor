@@ -444,7 +444,8 @@ def compute_fft_anisotropy(psd2d, fftSizeSub = -1, percentileZero = -1, rotation
     ############### ECCENTRICITY/ORIENTATION
     # Compute eccentricity and orientation of anisotropy
     idxMax = np.argmin(eigvals)
-    eccentricity = np.max(np.sqrt(eigvals))/np.min(np.sqrt(eigvals))
+    #eccentricity = np.max(np.sqrt(eigvals))/np.min(np.sqrt(eigvals))
+    eccentricity = math.sqrt(1-np.min(eigvals)/np.max(eigvals))
     orientation = np.degrees(math.atan(eigvecs[0,idxMax]/eigvecs[1,idxMax]))
         
     return psd2dsub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs, percZero, psd2dsubSmooth
