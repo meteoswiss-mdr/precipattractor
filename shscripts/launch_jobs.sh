@@ -35,12 +35,12 @@ for period in $(seq 0 $[$nrPeriods-1]); do
 	#jobName=$(printf precip_attractor%03g $[$period+1])
 	jobName=$(printf precip_attractor_%10i-%10i $startTime $endTime)
     
-	#srun --job-name=$jobName --output=$outDir/$jobName.out --error=$outDir/$jobName.err $resourcesPerJob \
-	#$pyDir/radar_statistics.py -start $startTime -end $endTime -wols $wols -minR $minR -accum $accumMin -format $fmt &
+	srun --job-name=$jobName --output=$outDir/$jobName.out --error=$outDir/$jobName.err $resourcesPerJob \
+	$pyDir/radar_statistics.py -start $startTime -end $endTime -wols $wols -minR $minR -accum $accumMin -format $fmt -plt autocorr&
 	
 	echo "Job submitted:"
 	echo "srun --job-name=$jobName --output=$outDir/$jobName.out --error=$outDir/$jobName.err $resourcesPerJob \
-	#$pyDir/radar_statistics.py -start $startTime -end $endTime -wols $wols -minR $minR -accum $accumMin -format $fmt"
+	#$pyDir/radar_statistics.py -start $startTime -end $endTime -wols $wols -minR $minR -accum $accumMin -format $fmt -plt autocorr"
 done
 
 

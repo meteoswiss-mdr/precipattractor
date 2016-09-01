@@ -14,6 +14,7 @@ from __future__ import print_function
 
 import sys
 import math 
+import time 
 
 import numpy as np
 import pandas as pd
@@ -50,6 +51,12 @@ def get_column_list(list2D, columnNr):
     return(listColumn)
 
 def get_variable_indices(subsetVariableNames, listVariableNames):
+    '''
+    Function to return the linear indices of the subset of variables in a longer list of variables
+    '''
+    if type(subsetVariableNames) is not list:
+        subsetVariableNames = [subsetVariableNames]
+        
     nrVarTot = len(listVariableNames)
     nrVarSubset = len(subsetVariableNames)
 
@@ -356,7 +363,7 @@ def compute_fft_anisotropy(psd2d, fftSizeSub = -1, percentileZero = -1, rotation
     eccentricity : float
         Eccentricity of the anisotropy (sqrt(1-eigval_max/eigval_min)) in range 0-1
     orientation : float
-        Orientation of the anisotropy (degrees using trigonometrical convention, 0 degrees -> East, 90 degrees -> North, 180 degrees -> West)
+        Orientation of the anisotropy (degrees using trigonometrical convention, -90 degrees -> South, 90 degrees -> North, 0 degrees -> East)
     xbar : float
         X-coordinate of the center of the intertial axis of anisotropy (pixels)
     ybar : float
@@ -463,6 +470,9 @@ def compute_autocorrelation_fft(imageArray, FFTmod = 'NUMPY'):
     autocovariance. In order to obtain values of correlation between -1 and 1, one must center the signal by removing the mean before
     computing the FFT and then divide the obtained auto-correlation (after inverse transform) by the variance of the signal.
     '''
+    
+    tic = time.clock()
+    
     # Compute field mean and variance
     field_mean = np.mean(imageArray)
     field_var = np.var(imageArray)
@@ -494,6 +504,8 @@ def compute_autocorrelation_fft(imageArray, FFTmod = 'NUMPY'):
     autocorrelation_shifted = np.fft.fftshift(autocorrelation)
     powerSpectrum_shifted = np.fft.fftshift(powerSpectrum) # Add back mean to spectrum??
     
+    toc = time.clock()
+    #print("Elapsed time for ACF using FFT: ", toc-tic, " seconds.")
     return(autocorrelation_shifted, powerSpectrum_shifted)
     
 def percentiles(array, percentiles):

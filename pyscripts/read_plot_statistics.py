@@ -8,7 +8,7 @@ import pandas as pd
 import sys
 
 import matplotlib as mpl
-mpl.use('Agg')
+#mpl.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import matplotlib.dates as md
@@ -33,6 +33,8 @@ fmt3 = "%.3f"
 ################# DEFAULT ARGS #########################
 inBaseDir = '/store/msrad/radar/precip_attractor/data/' #'/scratch/lforesti/data/'
 outBaseDir = '/users/lforesti/results/'
+# Whether we used a variable scaling break 
+variableBreak = 1
 
 ########GET ARGUMENTS FROM CMD LINE####
 parser = argparse.ArgumentParser(description='Plot radar rainfall field statistics.')
@@ -68,14 +70,14 @@ else:
 
 timeStart = ti.timestring2datetime(timeStartStr)
 timeEnd = ti.timestring2datetime(timeEndStr)
-
+            
 ############### OPEN FILES WITH STATS
 if args.format == 'csv':
     arrayStats, variableNames = io.csv_list2array(timeStart, timeEnd, inBaseDir, analysisType='STATS', \
-    product = product, timeAccumMin = timeSampMin, minR=args.minR, wols=args.wols)
+    product = product, timeAccumMin = timeSampMin, minR=args.minR, wols=args.wols, variableBreak=variableBreak)
 elif args.format == 'netcdf':
     arrayStats, variableNames = io.netcdf_list2array(timeStart, timeEnd, inBaseDir, analysisType='STATS', \
-    product = product, timeAccumMin = timeAccumMin, minR=args.minR, wols=args.wols)
+    product = product, timeAccumMin = timeAccumMin, minR=args.minR, wols=args.wols, variableBreak=variableBreak)
 else:
     print('Please provide a valid file format.')
     sys.exit(1)
@@ -91,18 +93,16 @@ arrayStats = np.array(arrayStats)
 print(len(arrayStats),' samples found.')
 print('Variables from file: ', variableNames)
 
-if (len(arrayStats) == 0) & (args.format == 'csv'):
-    print("No data found in CSV files.")
+if (len(arrayStats) == 100) & (args.format == 'csv'):
+    print("Not enough data found in CSV files.")
     sys.exit(1)
-if (len(arrayStats) == 0) & (args.format == 'netcdf'):
-    print("No data found in NETCDF files.")
+if (len(arrayStats) < 100) & (args.format == 'netcdf'):
+    print("No enough data found in NETCDF files.")
     sys.exit(1)
 
 #################################################################################
 ####################### PLOTTING MULTIPLE ATTRACTORS in combinations of dimensions
-varNames = ['war', 'r_mean', 'beta1', 'beta2']
-sectionIntervals = np.array([[10,12],[1.0,1.1], [2.0, 2.2], [3.0,3.2]])
-
+varNames = ['war', 'r_cmean', 'beta1', 'beta2']
 warThreshold = args.minWAR
 betaCorrThreshold = args.minCorrBeta
 
@@ -111,16 +111,18 @@ print('Variables for plotting: ', varNames)
 ############### AXIS LIMITS
 boolLogPlot = True
 if boolLogPlot:
-    WARlims = [0,18] # [6,18]
+    WARlims = [6,18] # [6,18]
     IMFlims = [-25,10] # [-20,5]
+    MMlims = [-6,10] # [-20,5]
 else:
     WARlims = [warThreshold,60]
     IMFlims = [0.03, 3.0]
-beta1lims = [0.5,3] #[1.6,2.8]
-beta2lims = [2,4] #[3.2,4]
-axesLimits = np.array([WARlims, IMFlims, beta1lims, beta2lims])
+    MMlims = [0.5, 3.0] # [-20,5]
+beta1lims = [1.4,3] #[1.6,2.8]
+beta2lims = [1.8,4] #[3.2,4]
+axesLimits = np.array([WARlims, MMlims, beta1lims, beta2lims])
 
-trajectoryPlot = 'coloredlines' # 'lines' 'scatter' 'coloredlines' 'sections'
+trajectoryPlot = 'sections' # 'lines' 'scatter' 'coloredlines' 'sections'
 densityPlot = '2dhist'# 'kde' or '2dhist'
 nrBinsX = 60
 nrBinsY = 60
@@ -133,6 +135,8 @@ for var in range(0, len(varNames)):
         varLabels.append('WAR')
     if varNames[var] == 'r_mean':
         varLabels.append('IMF')
+    if varNames[var] == 'r_cmean':
+        varLabels.append('MM')
     if varNames[var] == 'beta1':
         varLabels.append(r'$\beta_1$')
     if varNames[var] == 'beta2':
@@ -168,6 +172,15 @@ for var in range(0, len(varNames)):
 
 varData = np.array(varData).T
 
+# Define surfaces of section
+minPercSec = 48
+maxPercSec = 52
+medianSectionStart = np.percentile(varData, minPercSec, axis=0)
+medianSectionEnd = np.percentile(varData, maxPercSec, axis=0)
+
+#sectionIntervals = np.array([[10,12],[1.0,1.1], [2.0, 2.2], [3.0,3.2]])
+sectionIntervals = np.vstack((medianSectionStart,medianSectionEnd)).T
+
 ##### Select subset of array within given range
 # boolData = (varData[:,2] > 1.45) & (varData[:,2] < 1.55) & (varData[:,3] > 3.0) & (varData[:,3] < 3.1)
 # #varData = varData[boolData,:]
@@ -185,7 +198,50 @@ varData = np.array(varData).T
     # if (nrConsecFields == 12):
         # print(timeStampsSel[i-12])
 ################
+############## HISTOGRAM SCALING BREAK
 
+indexScalingVar = dt.get_variable_indices('scaling_break', variableNames)
+scalingBreak = arrayStats[boolTot,indexScalingVar]
+scaleBreaks = np.unique(scalingBreak)
+bins = np.hstack((scaleBreaks-1,50))
+
+counts, bins = np.histogram(scalingBreak, bins = bins)
+nrSamples = len(scalingBreak)
+counts = 100.0*counts/float(nrSamples)
+meanVal = np.nanmean(scalingBreak)
+medianVal = np.nanmedian(scalingBreak)
+stdVal = np.nanstd(scalingBreak)
+width = 0.4 * (bins[1] - bins[0])
+center = (bins[:-1] + bins[1:]) / 2.0
+
+# Plot hist
+axSb = plt.gca()
+print(scaleBreaks, counts)
+plt.bar(scaleBreaks, counts, align='center', width=width, color='blue', edgecolor='blue')
+textMedian = r'median = ' + str(medianVal)
+textMean = r'$\mu$ = ' + str("%0.2f" % meanVal)
+textStd = r'$\sigma$ = ' + str("%0.2f" % stdVal)
+plt.text(0.75, 0.95, textMedian, transform=axSb.transAxes, fontsize=14)
+plt.text(0.75, 0.91, textMean, transform=axSb.transAxes, fontsize=14)
+plt.text(0.75, 0.87, textStd, transform=axSb.transAxes, fontsize=14)
+
+maxPerc = 25
+plt.ylim([0, maxPerc])
+plt.xlabel('Scaling break [km]')
+plt.ylabel('Frequency [%]')
+
+#titleStr = 'Optimal scaling break \n' + product + ': ' + str(timeStampsDt[0]) + ' - ' + str(timeStampsDt[len(timeStampsDt)-1])
+titleStr = 'Optimal scaling break \n' + product + ': ' + str(timeStampsDt[0].year)
+plt.title(titleStr, fontsize=16)
+#plt.show()
+
+fileName = outBaseDir + product + timeStartStr + '-' + timeEndStr +  '0_' + \
+'Rgt' + str(args.minR) + '_WOLS' + str(args.wols) + '_00005_histScaleBreak_warGt' + str("%0.1f" % warThreshold) + '_' + timeAccumMinStr + '.png'
+print('Saving: ',fileName)
+plt.savefig(fileName, dpi=300)
+sys.exit()
+
+########################################
 # Compute duration of event for colour scale
 durationFromStart = timeStampsDt[0] - timeStampsDt[len(timeStampsDt)-1]
 hoursFromStart = np.abs(durationFromStart.total_seconds())/3600
@@ -214,8 +270,8 @@ for row in range(0,subPlotNr):
     for col in range(0,subPlotNr): # loop first by changing the X axis variable and keeping the Y axis variable fixed
         # log transform variables if necessary
         # X variable
-        if (varNames[col] == 'r_mean' or varNames[col] == 'war') and boolLogPlot:
-            if varNames[col] == 'r_mean':
+        if ((varNames[col] == 'r_mean') or (varNames[col] == 'r_cmean') or (varNames[col] == 'war')) and boolLogPlot:
+            if (varNames[col] == 'r_mean') or (varNames[col] == 'r_cmean'):
                 offset = 0.005
             elif varNames[col] == 'war':
                 offset = 0.01
@@ -227,8 +283,8 @@ for row in range(0,subPlotNr):
             varX = varData[:,col]
             varXLab = varLabels[col]
         # Y variable
-        if (varNames[row] == 'r_mean' or varNames[row] == 'war') and boolLogPlot:
-            if varNames[row] == 'r_mean':
+        if ((varNames[row] == 'r_mean') or (varNames[row] == 'r_cmean') or (varNames[row] == 'war')) and boolLogPlot:
+            if (varNames[row] == 'r_mean') or (varNames[row] == 'r_cmean'):
                 offset = 0.005
             elif varNames[row] == 'war':
                 offset = 0.01
@@ -257,7 +313,7 @@ for row in range(0,subPlotNr):
         ymin = np.min(varY)
         ymax = np.max(varY)
         
-        ############ Plot attractor trajectories
+        ############ Plot attractor trajectories or sections
         if (row > col):
             titleStrSP = 'r=' + '%.2f' % r
             if trajectoryPlot == 'coloredlines':
@@ -275,6 +331,8 @@ for row in range(0,subPlotNr):
                 plt.scatter(varX, varY)
             if trajectoryPlot == 'lines':
                 plt.plot(varX, varY)
+                
+            ############# Plot sections
             if trajectoryPlot == 'sections':
                 idxLabs = np.where(np.logical_and(varNames != varNames[col],varNames != varNames[row]))
                 
@@ -294,8 +352,8 @@ for row in range(0,subPlotNr):
                 varYsect = varY[idxData[0]]
                 
                 # The colors of the dots are defined by the fourth variable
-                if (labVar4 == 'IMF' or labVar4 == 'WAR') and boolLogPlot:
-                    if labVar4 == 'IMF':
+                if (labVar4 == 'IMF' or labVar4 == 'MM' or labVar4 == 'WAR') and boolLogPlot:
+                    if (labVar4 == 'IMF') or (labVar4 == 'MM'):
                         offset = 0.005
                     elif labVar4 == 'WAR':
                         offset = 0.01
@@ -307,12 +365,18 @@ for row in range(0,subPlotNr):
                     var4col = varData[idxData[0],idxVar4]
 
                 # Scatter
-                scIm = plt.scatter(varXsect, varYsect, c=var4col, vmin=axesLimits[idxVar4,0], vmax= axesLimits[idxVar4,1], s=1, edgecolor='none')
+                vmin = axesLimits[idxVar4,0]
+                vmax = axesLimits[idxVar4,1]
+                vmin = np.percentile(var4col,5)
+                vmax = np.percentile(var4col,95)
+                
+                scIm = plt.scatter(varXsect, varYsect, c=var4col, vmin=vmin, vmax=vmax, s=1.5, edgecolor='none')
                 cbar = plt.colorbar(scIm)
                 cbar.set_label(labVar4, labelpad=-15, y=1.10, rotation=0, fontsize=9)
                 #cbar.ax.set_title(labVar4)
 
-                titleStrSP = 'Sect. for ' + labVar3 + ': ' + str(minInterval) + '-' + str(maxInterval)
+                #titleStrSP = 'Sect. for ' + labVar3 + ': ' + str(minInterval) + '-' + str(maxInterval)
+                titleStrSP = 'Surface section for ' + str(int((maxPercSec+minPercSec)/2))+ '-pctile \n' + labVar3 + ' in ' + str(fmt2 % minInterval) + '-' + str(fmt2 % maxInterval)
                 
             # Axis limits and title
             plt.xlim(axesLimits[col,0],axesLimits[col,1])
@@ -321,6 +385,8 @@ for row in range(0,subPlotNr):
         
         ############# Plot 2d histogram or kernel density
         if (row < col):
+            # Compute correlation
+            beta, intercept, r_beta, p_value, std_err = stats.linregress(varX, varY)
             if densityPlot == 'kde':
                 # Compute kernel density
                 X, Y = np.mgrid[xmin:xmax:100j, ymin:ymax:100j]
@@ -356,7 +422,7 @@ for row in range(0,subPlotNr):
                 countsMask = ma.array(counts,mask=np.isnan(counts))
                 
                 # Draw histogram
-                maxFreq = nrBinsX/(nrBinsX/0.4)
+                maxFreq = nrBinsX/(nrBinsX/0.3)
                 histIm = plt.pcolormesh(xbins, ybins, countsMask.T, cmap=cmapHist, vmax = maxFreq)
                 #cbar = plt.colorbar(histIm)
                 
@@ -366,8 +432,16 @@ for row in range(0,subPlotNr):
                 # Directly plot histogram
                 #plt.hist2d(varX, varY, bins=20, cmin=1, cmap=cmapHist) #, norm=LogNorm()) # gist_ncar, jet, spectral
                 
-            plt.xlim(axesLimits[col,0],axesLimits[col,1])
-            plt.ylim(axesLimits[row,0],axesLimits[row,1])
+                plt.xlim(axesLimits[col,0],axesLimits[col,1])
+                plt.ylim(axesLimits[row,0],axesLimits[row,1])
+                corrText = 'R=' + str(fmt2 % r_beta)
+                if np.abs(r_beta) > 0.4:
+                    colore = 'red'
+                else:
+                    colore = 'black'
+                axSb = plt.gca()
+                plt.text(0.74, 0.93, corrText, transform=axSb.transAxes, fontsize=8, color=colore,bbox=dict(facecolor='white', edgecolor='black', pad=1.0))
+            
         # Plot time series on the diagonal
         if (row == col) and (len(varX) <= 288*1): # plot max 5 days
             axDiag=plt.gca()
@@ -394,7 +468,7 @@ for row in range(0,subPlotNr):
             textStd = r'$\sigma$ = ' + str("%0.2f" % stdVal)
             plt.text(0.05, 0.90, textMean, transform=axSb.transAxes, fontsize=8)
             plt.text(0.05, 0.84, textStd, transform=axSb.transAxes, fontsize=8)
-            maxPerc = 10
+            maxPerc = 12
             plt.ylim([0, maxPerc])
         # Axis labels
         if col == 0:
@@ -451,7 +525,12 @@ if trajectoryPlot == 'sections':
     fig.text(xoffset, yoffset-6*lineSpacing, textConditions, fontsize=12, color='blue')
     textConditions = r"$\frac{N_\beta}{N_{WAR}}$ = " + str(fmt1 % fractionValidBetas) + " %"
     fig.text(xoffset, yoffset-7.2*lineSpacing, textConditions, fontsize=12, color='blue')
-
+    
+    # Variables acronyms
+    fig.text(xoffset, 0.07, "WAR = Wet area ratio", fontsize=11, color='black')
+    fig.text(xoffset, 0.05, "MM = Marginal mean", fontsize=11, color='black')
+    fig.text(xoffset, 0.02, "dB = decibel", fontsize=11, color='black')
+    
 ###### Save figure 
 fileName = outBaseDir + product + timeStartStr + '-' + timeEndStr +  '0_' + \
 'Rgt' + str(args.minR) + '_WOLS' + str(args.wols) + '_00005_attractorSubplots_warGt' + str("%0.1f" % warThreshold) + '_' + timeAccumMinStr + '.png'

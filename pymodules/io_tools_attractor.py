@@ -28,7 +28,7 @@ from operator import itemgetter
 
 import time_tools_attractor as ti
 
-def get_filename_stats(inBaseDir, analysisType, timeDate, product='AQC', timeAccumMin=5, quality=0, minR=0.08,  wols=0, format='netcdf'):
+def get_filename_stats(inBaseDir, analysisType, timeDate, product='AQC', timeAccumMin=5, quality=0, minR=0.08,  wols=0, variableBreak = 0, format='netcdf'):
     if format == 'netcdf':
         extension = '.nc'
     elif format == 'csv':
@@ -51,7 +51,7 @@ def get_filename_stats(inBaseDir, analysisType, timeDate, product='AQC', timeAcc
     
     ### Define filename of statistics
     fullName = inDir + product + '_' + analysisType + '_' + yearStr + julianDayStr + hourminStr + str(quality) + \
-        '_Rgt' + str(minR) + '_WOLS' + str(wols) + '_' + timeAccumMinStr + extension
+        '_Rgt' + str(minR) + '_WOLS' + str(wols) + '_varBreak' + str(variableBreak) + '_' + timeAccumMinStr + extension
     
     # Get directory name and base filename
     dirName = inDir
@@ -106,7 +106,7 @@ def write_csv(fileName, headers, dataArray):
     f.close()
 
 # Read-in list of CSV or NETCDF files containing radar rainfall statistics
-def csv_list2array(timeStart, timeEnd, inBaseDir, analysisType='STATS', product='AQC', quality=0, timeAccumMin=5, minR=0.08, wols=0):
+def csv_list2array(timeStart, timeEnd, inBaseDir, analysisType='STATS', product='AQC', quality=0, timeAccumMin=5, minR=0.08, wols=0, variableBreak=0):
     timeAccumMinStr = '%05i' % (timeAccumMin)
     
     listStats = []
@@ -114,7 +114,7 @@ def csv_list2array(timeStart, timeEnd, inBaseDir, analysisType='STATS', product=
     timeLocal = timeStart
     while timeLocal <= timeEnd:
         # Create filename
-        fileName,_,_ = get_filename_stats(inBaseDir, analysisType, timeLocal, product, timeAccumMin, quality, minR,  wols, format='csv')
+        fileName,_,_ = get_filename_stats(inBaseDir, analysisType, timeLocal, product, timeAccumMin, quality, minR,  wols, variableBreak, format='csv')
         
         print('Reading: ', fileName)
         try:
@@ -153,7 +153,7 @@ def csv_list2array(timeStart, timeEnd, inBaseDir, analysisType='STATS', product=
     return(listStats, variableNames)
 
     # Read-in list of CSV or NETCDF files containing radar rainfall statistics
-def netcdf_list2array(timeStart,timeEnd, inBaseDir, variableNames = [], analysisType='STATS', product='AQC', quality=0, timeAccumMin=5, minR=0.08, wols=0):
+def netcdf_list2array(timeStart,timeEnd, inBaseDir, variableNames = [], analysisType='STATS', product='AQC', quality=0, timeAccumMin=5, minR=0.08, wols=0, variableBreak=0):
     timeAccumMinStr = '%05i' % (timeAccumMin)
     '''
     
@@ -162,7 +162,7 @@ def netcdf_list2array(timeStart,timeEnd, inBaseDir, variableNames = [], analysis
     timeLocal = timeStart
     while timeLocal <= timeEnd:
         # Create filename
-        fileName,_,_ = get_filename_stats(inBaseDir, analysisType, timeLocal, product, timeAccumMin, quality, minR,  wols, format='netcdf')
+        fileName,_,_ = get_filename_stats(inBaseDir, analysisType, timeLocal, product, timeAccumMin, quality, minR, wols, variableBreak, format='netcdf')
         
         print('Reading: ', fileName)
         try:
@@ -278,6 +278,13 @@ def write_netcdf(fileName, headers, dataArray, lowRainThreshold, boolWOLS):
             nc_var.description = "Slope of the Fourier power spectrum for small spatial wavelengths [3-20 km]"
         if varName == 'corr_beta2':
             nc_var.description = "Correlation coeff. of the linear fit for beta2"
+        if varName == 'scaling_break':
+            nc_var.description = "Best scaling break of the 1d power spectrum"
+            nc_var.units = "km"
+        if varName == 'eccentricity':
+            nc_var.description = "Eccentricity of the anisotropy [0-1]"
+        if varName == 'orientation':
+            nc_var.description = "Orientation of the anisotropy [-90 to 90 degrees]"
             
     nc_fid.close()
     

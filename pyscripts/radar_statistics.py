@@ -262,12 +262,14 @@ while timeLocal <= timeEnd:
             
             # Set all the data below a rainfall threshold to NaN (for conditional statistics)
             rainrateC = np.copy(rainrate)
-            condition = rainrateC <= rainThresholdStats
+            condition = rainrateC < rainThresholdStats
             rainrateC[condition] = np.nan
             
             # Set all the -999 to NaN (for unconditional statistics)
-            condition = rainrate < rainThresholdStats
+            condition = rainrate < 0
             rainrate[condition] = np.nan
+            condition = (rainrate < rainThresholdStats) & (rainrate > 0.0)
+            rainrate[condition] = 0.0
         except IOError:
             print('File ', fileName, ' not readable')
             war = -1
@@ -352,7 +354,7 @@ while timeLocal <= timeEnd:
                     psd2d_anis = np.copy(psd2d)
                 
                 # Compute anisotropy from FFT spectrum
-                fftSizeSub = 40
+                fftSizeSub = 255
                 percentileZero = 90
                 smoothing_sigma = 3
                 psd2dsub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs, percZero, psd2dsubSmooth = dt.compute_fft_anisotropy(psd2d_anis, fftSizeSub, percentileZero, sigma = smoothing_sigma)
@@ -382,7 +384,7 @@ while timeLocal <= timeEnd:
             freq[freq==0] = np.nan
             
             ############ Compute spectral slopes Beta
-            scalingBreakArray_KM = [6,8,10,12,14,18,20,25,30,40,60,80,100]
+            scalingBreakArray_KM = np.arange(6, 42, 2)
             r_beta1_best = 0
             r_beta2_best = 0
             for s in range(0,len(scalingBreakArray_KM)):
@@ -397,7 +399,7 @@ while timeLocal <= timeEnd:
                 #print('Nr points beta2 = ', np.sum(idxBeta2))
                 #io.write_csv('/users/' + usrName + '/results/ps_marco.csv', ['freq','psd'], np.asarray([freq,psd1d]).T.tolist())
                 
-                # Compute betas using  OLS
+                # Compute betas using OLS
                 if weightedOLS == 0:
                     beta1, intercept_beta1, r_beta1 = dt.compute_beta_sm(10*np.log10(freq[idxBeta1]),10*np.log10(psd1d[idxBeta1]))          
                     beta2, intercept_beta2, r_beta2  = dt.compute_beta_sm(10*np.log10(freq[idxBeta2]), 10*np.log10(psd1d[idxBeta2]))
@@ -815,7 +817,7 @@ while timeLocal <= timeEnd:
             # Headers
             headers = ['time', 'alb', 'doe', 'mle', 'ppm', 'wei', 'war', 'r_mean', 'r_std', 'r_cmean', 'r_cstd',
             'dBZ_mean', 'dBZ_std', 'dBZ_cmean', 'dBZ_cstd', 
-            'beta1', 'corr_beta1', 'beta2', 'corr_beta2' , 'eccentricity']
+            'beta1', 'corr_beta1', 'beta2', 'corr_beta2' , 'scaling_break', 'eccentricity', 'orientation']
             
             # Data
             instantStats = [timeStampStr,
@@ -837,7 +839,10 @@ while timeLocal <= timeEnd:
             fmt3 % r_beta1,
             fmt3 % beta2,
             fmt3 % r_beta2,
-            fmt3 % eccentricity]
+            int(scalingBreak_best),
+            fmt3 % eccentricity,
+            fmt2 % orientation
+            ]
 
             print(instantStats)
             dailyStats.append(instantStats)
@@ -855,13 +860,19 @@ while timeLocal <= timeEnd:
         timePreviousDay = timeLocal - datetime.timedelta(days = 1)
         
         # Generate filenames
+        # Whther we used a variable scaling break 
+        if len(scalingBreakArray_KM) > 1:
+            variableBreak = 1
+        else:
+            variableBreak = 0
+            
         analysisType = 'STATS'
         if hourminStr == '0000':
             fileNameStats,_,_ = io.get_filename_stats(inBaseDir, analysisType, timePreviousDay, product, timeAccumMin=timeAccumMin, \
-            quality=0, minR=rainThresholdWAR, wols=weightedOLS, format=args.format)
+            quality=0, minR=rainThresholdWAR, wols=weightedOLS, variableBreak = variableBreak, format=args.format)
         else:
             fileNameStats,_,_ = io.get_filename_stats(inBaseDir, analysisType, timeLocal, product, timeAccumMin=timeAccumMin, \
-            quality=0, minR=rainThresholdWAR, wols=weightedOLS, format=args.format)
+            quality=0, minR=rainThresholdWAR, wols=weightedOLS, variableBreak = variableBreak, format=args.format)
         
         # Write out files
         if (boolPlotting == False):
@@ -876,7 +887,7 @@ while timeLocal <= timeEnd:
             
             # Copy file from /scratch to /store
             fileNameStatsOut, outDir,_ = io.get_filename_stats(outBaseDir, analysisType, timeLocal, product, timeAccumMin=timeAccumMin, \
-            quality=0, minR=rainThresholdWAR,  wols=weightedOLS, format=args.format)
+            quality=0, minR=rainThresholdWAR,  wols=weightedOLS, variableBreak = variableBreak, format=args.format)
             
             cmd = 'mkdir -p ' + outDir
             os.system(cmd)
