@@ -113,17 +113,17 @@ if (len(arrayStats) == 0) & (args.format == 'netcdf'):
 
 #################################################################################
 ####################### ANALYSE GROWTH OF ERRORS
-varNames = ['war', 'r_mean', 'beta1', 'beta2']
+varNames = ['war', 'r_cmean', 'beta1', 'beta2']
 warThreshold = args.minWAR
 betaCorrThreshold = args.minCorrBeta
-useTrajectWholeArchive = True
+useTrajectWholeArchive = False
 independenceTimeHours = 24
 logIMFWAR = False
 
-logTime = True # Keep it True
+logTime = True # Keep it True (or false to check exponential growth of errors)
 logSpread = True # Keep it True
 ylims = [10**-1.7,10**0.5]
-maxLeadTimeMin = 60*24
+maxLeadTimeMin = 60*48
 
 # Definition of initial conditions
 initialCondIntervals = [0.5, 0.01, 0.05, 0.05]
@@ -150,6 +150,11 @@ for var in range(0, len(varNames)):
             varLabels.append('IMF [dB]')
         else:
             varLabels.append('IMF')
+    if varNames[var] == 'r_cmean':
+        if logIMFWAR:
+            varLabels.append('MM [dB]')
+        else:
+            varLabels.append('MM')
     if varNames[var] == 'beta1':
         varLabels.append(r'$\beta_1$')
     if varNames[var] == 'beta2':
@@ -168,7 +173,7 @@ boolBetaCorr = (arrayStats[:,dictIdx['beta1']+1] <= -betaCorrThreshold) & (array
 # Combination of thresholds
 boolTot = boolWAR & boolBetaCorr
 
-############### Select subset of data
+############### Select subset of data (having WAR >= threshold)
 arrayStats_subset = []
 arrayStats_all = []
 for var in range(0, len(varNames)):
@@ -199,19 +204,21 @@ timeStamps_absolute_subset = timeStamps_absolute[boolTot]
 
 # Compute summary stats for normalization and quantiles for automatic selection of initial conditions
 if useTrajectWholeArchive == False:
-    arrayStats_Mean = np.mean(arrayStats_subset, axis=0)
-    arrayStats_Std = np.std(arrayStats_subset, axis=0)
+    arrayStats_minPerc = np.nanpercentile(arrayStats_subset, 10, axis=0)
+    arrayStats_maxPerc = np.nanpercentile(arrayStats_subset, 90, axis=0)
+    arrayStats_Mean = np.nanmean(arrayStats_subset, axis=0)
+    arrayStats_Std = np.nanstd(arrayStats_subset, axis=0)
 
 else:
-    arrayStats_Mean = np.mean(arrayStats_all, axis=0)
-    arrayStats_Std = np.std(arrayStats_all, axis=0)
+    arrayStats_minPerc = np.nanpercentile(arrayStats_all, 10, axis=0)
+    arrayStats_maxPerc = np.nanpercentile(arrayStats_all, 90, axis=0)
+    arrayStats_Mean = np.nanmean(arrayStats_all, axis=0)
+    arrayStats_Std = np.nanstd(arrayStats_all, axis=0)
 
 print('Means: ', arrayStats_Mean)
 print('St.devs: ', arrayStats_Std)
 
 # Set new initial conditions
-arrayStats_minPerc = np.percentile(arrayStats_subset, 5, axis=0)
-arrayStats_maxPerc = np.percentile(arrayStats_subset, 98, axis=0)
 print('MinPerc: ', arrayStats_minPerc)
 print('MaxPerc: ', arrayStats_maxPerc)
 
@@ -228,12 +235,17 @@ print('Initial intervals: ', initialCondIntervals)
 ############### SELECT INTERVAL FOR INITIAL CONDITIONS
 nrLeadTimes = int(maxLeadTimeMin/timeSampMin)
 nrDimensions = arrayStats_subset.shape[1]
+# Generate lead times
+leadTimesMin = []
+for lt in range(0,nrLeadTimes):
+    leadTimesMin.append(lt*timeSampMin)
+leadTimesMin = np.array(leadTimesMin)
 
 fig = plt.figure(figsize=(13, 13))
 ax = fig.add_axes()
 ax = fig.add_subplot(111)
 
-colormap = plt.cm.gist_rainbow
+colormap = plt.cm.gist_rainbow # plt.cm.gray
 nrRowsColsSubplots = 2
 p = 0
 
@@ -249,18 +261,22 @@ for variable in range(0, len(varNames)): ## LOOP OVER VARIABLES
     
     axSP = plt.subplot(nrRowsColsSubplots, nrRowsColsSubplots, p)
     print('Subplot nr: ', p)
-    
+    print('++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++')
     for step in range(0, nrSteps): ## LOOP OVER STEPS FOR INITIAL CONDITIONS
         # Define min and max value for initial conditions
         minInit = analysisSteps[step]
         maxInit = analysisSteps[step] + initialCondIntervals[variable]
         
         # Select data and time stamps of initial conditions
-        initialConditions_data = (arrayStats_subset[:,variable] >= minInit) & (arrayStats_subset[:,variable] <= maxInit)
-        initialConditions_timestamps = timeStamps_absolute_subset[initialConditions_data]
+        if useTrajectWholeArchive == False:
+            initialConditions_data = (arrayStats_subset[:,variable] >= minInit) & (arrayStats_subset[:,variable] <= maxInit)
+            initialConditions_timestamps = timeStamps_absolute_subset[initialConditions_data]
+        else:
+            initialConditions_data = (arrayStats_all[:,variable] >= minInit) & (arrayStats_all[:,variable] <= maxInit)
+            initialConditions_timestamps = timeStamps_absolute[initialConditions_data]
         
         nrInitPoints = np.sum(initialConditions_data == True)
-        print(nrInitPoints, ' samples in ', varLabels[variable], ' range ', minInit,'-',maxInit)
+        print(nrInitPoints, ' starting points in ', varLabels[variable], ' range ', minInit,'-',maxInit)
         
         # Compute time differences between consecutive time stamps of initial conditions
         timeDiffs = np.diff(initialConditions_timestamps)
@@ -281,7 +297,7 @@ for variable in range(0, len(varNames)): ## LOOP OVER VARIABLES
         initialConditions_timestamps_indep = np.array(initialConditions_timestamps_indep)
         
         nrInitPoints = len(initialConditions_timestamps_indep)
-        print(nrInitPoints, ' independent samples in ', varLabels[variable], ' range ', minInit,'-',maxInit)
+        print(nrInitPoints, ' independent starting points in ', varLabels[variable], ' range ', minInit,'-',maxInit)
         
         ################## GET ANALOGUE DATA SEQUENCES FOLLOWING TIME STAMPS
         # Loop over such points and get data sequences
@@ -299,29 +315,36 @@ for variable in range(0, len(varNames)): ## LOOP OVER VARIABLES
                 sys.exit(1)
 
             indicesSequence = np.arange(idx,idx+nrLeadTimes)
-
-            # Handle sequences that go beyond the dataset limits
-            if np.sum(indicesSequence >= len(timeStamps_absolute_subset)) > 0:
-                indicesSequence = indicesSequence[indicesSequence < len(timeStamps_absolute_subset)]
-                
+            
             # Select data sequences    
             if useTrajectWholeArchive == False:
+                # Handle sequences that go beyond the dataset limits
+                if np.sum(indicesSequence >= len(timeStamps_absolute_subset)) > 0:
+                    indicesSequence = indicesSequence[indicesSequence < len(timeStamps_absolute_subset)]
+                
                 sequenceTimes = timeStamps_absolute_subset[indicesSequence]
                 sequenceData = arrayStats_subset[indicesSequence,:]
             else:
+                # Handle sequences that go beyond the dataset limits
+                if np.sum(indicesSequence >= len(timeStamps_absolute)) > 0:
+                    indicesSequence = indicesSequence[indicesSequence < len(timeStamps_absolute)]
+                
+                # Add NaNs if sequence is shorter than number of lead times
                 sequenceTimes = timeStamps_absolute[indicesSequence]
                 sequenceData = arrayStats_all[indicesSequence]
 
             # Check times and radar operation and replace with NaNs
             timeDiffMin = np.array(np.diff(sequenceTimes)/60, dtype=int)
             
-            # Collect trajectories
+            # Collect trajectories (too strict criterion!!!)
             nrInvalidSamples = np.sum(timeDiffMin != timeSampMin)
             if (nrInvalidSamples == 0) & (len(sequenceTimes) == nrLeadTimes):
                 trajectories.append(sequenceData)
 
         trajectories = np.array(trajectories)
         
+        print(len(trajectories), ' valid trajetories in ', varLabels[variable], ' range ', minInit,'-',maxInit)
+        print('--------------------------------------------------------')
         if len(trajectories) > minNrTraj:
             #print(trajectories.shape[0], ' x ', trajectories.shape[1], ' x ', trajectories.shape[2], '($N_{analogue}$) x ($N_{leadtimes}$) x ($N_{dim}$)')
 
@@ -329,11 +352,13 @@ for variable in range(0, len(varNames)): ## LOOP OVER VARIABLES
             spreadArray = []
             for lt in range(0,nrLeadTimes):
                 dataLeadTime = trajectories[:,lt,:]
-                spreadLeadTime = np.std(dataLeadTime/arrayStats_Std, axis=0)
+                #print(dataLeadTime)
+                #sys.exit()
+                spreadLeadTime = np.nanstd(dataLeadTime/arrayStats_Std, axis=0)
                 spreadArray.append(spreadLeadTime)
 
             spreadArray = np.array(spreadArray)
-
+            
             ################## PLOTTING ################################################################################
             linewidth=2.0
             labelFontSize = 16
@@ -341,11 +366,6 @@ for variable in range(0, len(varNames)): ## LOOP OVER VARIABLES
             axesTicksFontSize = 14
             
             plt.tick_params(axis='both', which='major', labelsize=axesTicksFontSize)
-            # Generate lead times
-            leadTimesMin = []
-            for lt in range(0,nrLeadTimes):
-                leadTimesMin.append(lt*timeSampMin)
-            leadTimesMin = np.array(leadTimesMin)
                
             # Plot growth of spread
             legTxt = ' Range ' + str(fmt2 % minInit) + '-' + str(fmt2 % maxInit) + ' (N = ' + str(trajectories.shape[0]) + ')'
@@ -374,7 +394,7 @@ for variable in range(0, len(varNames)): ## LOOP OVER VARIABLES
             # Plot spread of trajectories
             if pltType == 'spread':
                 # Line colors
-                colors = [colormap(i) for i in np.linspace(0, 1,len(axSP.lines))]
+                colors = [colormap(i) for i in np.linspace(0, 1, len(axSP.lines))]
                 for i,j in enumerate(axSP.lines):
                     j.set_color(colors[i])
                 

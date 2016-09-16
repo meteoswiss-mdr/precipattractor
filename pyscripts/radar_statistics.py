@@ -51,6 +51,7 @@ inBaseDir = '/scratch/' + usrName + '/data/' # directory to read from
 outBaseDir = '/store/msrad/radar/precip_attractor/data/'
 fourierVar = 'dbz' # field on which to perform the fourier analysis ('rainrate' or 'dbz')
 plotSpectrum = '1d' #'1d', '2d', '1dnoise','2dnoise' or 'noise field'
+scalingBreakArray_KM = [15] #np.arange(6, 42, 2)
 fftDomainSize = 512
 weightedOLS = 1
 FFTmod = 'NUMPY' # 'FFTW' or 'NUMPY'
@@ -78,6 +79,11 @@ product = args.product
 weightedOLS = args.wols
 timeAccumMin = args.accum
 plotSpectrum = args.plt
+
+if len(scalingBreakArray_KM) > 1:
+    variableBreak = 1
+else:
+    variableBreak = 0
 
 if (timeAccumMin == 60) | (timeAccumMin == 60*24):
     timeSampMin = timeAccumMin
@@ -384,7 +390,6 @@ while timeLocal <= timeEnd:
             freq[freq==0] = np.nan
             
             ############ Compute spectral slopes Beta
-            scalingBreakArray_KM = np.arange(6, 42, 2)
             r_beta1_best = 0
             r_beta2_best = 0
             for s in range(0,len(scalingBreakArray_KM)):
@@ -439,9 +444,12 @@ while timeLocal <= timeEnd:
             intercept_beta2 = intercept_beta2_best
             smallScalesLims = smallScalesLims_best
             largeScalesLims = largeScalesLims_best
-
-            print("Best scaling break = ", scalingBreak_best, ' km')
             
+            if variableBreak == 1:
+                print("Best scaling break = ", scalingBreak_best, ' km')
+            else:
+                print("Fixed scaling break = ", scalingBreak_best, ' km')
+                
             # # Test for computing betas with GLM
             #import statsmodels.api as sm
             #segmentsEndog = 10*np.log10(psd1d[idxBetaBoth])#np.column_stack([10*np.log10(psd1d[idxBeta1]),10*np.log10(psd1d[idxBeta2])]) 
@@ -860,12 +868,6 @@ while timeLocal <= timeEnd:
         timePreviousDay = timeLocal - datetime.timedelta(days = 1)
         
         # Generate filenames
-        # Whther we used a variable scaling break 
-        if len(scalingBreakArray_KM) > 1:
-            variableBreak = 1
-        else:
-            variableBreak = 0
-            
         analysisType = 'STATS'
         if hourminStr == '0000':
             fileNameStats,_,_ = io.get_filename_stats(inBaseDir, analysisType, timePreviousDay, product, timeAccumMin=timeAccumMin, \

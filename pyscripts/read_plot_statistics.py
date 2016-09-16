@@ -34,7 +34,7 @@ fmt3 = "%.3f"
 inBaseDir = '/store/msrad/radar/precip_attractor/data/' #'/scratch/lforesti/data/'
 outBaseDir = '/users/lforesti/results/'
 # Whether we used a variable scaling break 
-variableBreak = 1
+variableBreak = 0
 
 ########GET ARGUMENTS FROM CMD LINE####
 parser = argparse.ArgumentParser(description='Plot radar rainfall field statistics.')
@@ -102,25 +102,37 @@ if (len(arrayStats) < 100) & (args.format == 'netcdf'):
 
 #################################################################################
 ####################### PLOTTING MULTIPLE ATTRACTORS in combinations of dimensions
-varNames = ['war', 'r_cmean', 'beta1', 'beta2']
+varNamesRows = ['war','r_cmean', 'beta1', 'beta2']
+varNamesCols = ['war','r_cmean', 'beta1', 'beta2']
+
+#varNamesRows = ['eccentricity']
+#varNamesCols = ['eccentricity', 'war','r_cmean', 'beta1', 'beta2']
+
 warThreshold = args.minWAR
 betaCorrThreshold = args.minCorrBeta
 
-print('Variables for plotting: ', varNames)
+print('Variables for plotting: ', varNamesRows, ' vs. ', varNamesCols)
 
 ############### AXIS LIMITS
 boolLogPlot = True
+boolPowPlotEccentricity = False
 if boolLogPlot:
     WARlims = [6,18] # [6,18]
     IMFlims = [-25,10] # [-20,5]
-    MMlims = [-6,10] # [-20,5]
+    MMlims = [-6,10] # [-20,5]    
 else:
     WARlims = [warThreshold,60]
     IMFlims = [0.03, 3.0]
     MMlims = [0.5, 3.0] # [-20,5]
-beta1lims = [1.4,3] #[1.6,2.8]
-beta2lims = [1.8,4] #[3.2,4]
-axesLimits = np.array([WARlims, MMlims, beta1lims, beta2lims])
+  
+if boolPowPlotEccentricity:
+    ecclims = [1,10]
+else:
+    ecclims = [0,1]
+
+beta1lims = [1.6,3] #[1.6,2.8]
+beta2lims = [2.0,4] #[3.2,4]
+
 
 trajectoryPlot = 'sections' # 'lines' 'scatter' 'coloredlines' 'sections'
 densityPlot = '2dhist'# 'kde' or '2dhist'
@@ -129,30 +141,36 @@ nrBinsY = 60
 
 ###############################################################################
 # Generate labels for plotting
+varNamesAll = varNamesRows + varNamesCols
+varNamesAll = dt.unique(varNamesAll)
+
 varLabels = []
-for var in range(0, len(varNames)):
-    if varNames[var] == 'war':
+for var in range(0, len(varNamesAll)):
+    if varNamesAll[var] == 'war':
         varLabels.append('WAR')
-    if varNames[var] == 'r_mean':
+    if varNamesAll[var] == 'r_mean':
         varLabels.append('IMF')
-    if varNames[var] == 'r_cmean':
+    if varNamesAll[var] == 'r_cmean':
         varLabels.append('MM')
-    if varNames[var] == 'beta1':
+    if varNamesAll[var] == 'beta1':
         varLabels.append(r'$\beta_1$')
-    if varNames[var] == 'beta2':
+    if varNamesAll[var] == 'beta2':
         varLabels.append(r'$\beta_2$')
+    if varNamesAll[var] == 'eccentricity':
+        varLabels.append('Eccentricity')
 
 #####
 # Get indices of variables
-indicesVars = dt.get_variable_indices(varNames, variableNames)
+indicesVars = dt.get_variable_indices(varNamesAll, variableNames)
+
 # Put indices into dictionary
-dictIdx = dict(zip(varNames, indicesVars))
-dictLabels = dict(zip(varNames, varLabels))
+dictIdx = dict(zip(varNamesAll, indicesVars))
 
 # WAR threshold
 boolWAR = (arrayStats[:,dictIdx['war']] >= warThreshold) 
 # Beta correlation threshold
-boolBetaCorr = (arrayStats[:,dictIdx['beta1']+1] <= -betaCorrThreshold) & (arrayStats[:,dictIdx['beta2']+1] <= -betaCorrThreshold)
+boolBetaCorr = (arrayStats[:,dictIdx['beta1']+1] <= -betaCorrThreshold) & (arrayStats[:,dictIdx['beta2']+1] <= -betaCorrThreshold) 
+#boolEccentricity = arrayStats[:,dictIdx['eccentricity']] < 0.96
 # Combination of thresholds
 boolTot = boolWAR & boolBetaCorr
 
@@ -163,14 +181,45 @@ print("Percentage valid betas: ", fmt1 % fractionValidBetas, " %")
 
 ############### Select subset of data
 varData = []
-for var in range(0, len(varNames)):
-    varName = varNames[var]
+for var in range(0, len(varNamesAll)):
+    varName = varNamesAll[var]
     if (varName == 'beta1') | (varName == 'beta2'):
         varData.append(-arrayStats[boolTot,dictIdx[varName]])
     else:
         varData.append(arrayStats[boolTot,dictIdx[varName]])
 
 varData = np.array(varData).T
+
+# Argument of maximum value (to select interesting cases)
+# print(dictIdx)
+# idxMax = np.argmax(arrayStats[:,6])
+# maxWARtime = timeStampsDt[idxMax]
+# print(maxWARtime, arrayStats[idxMax,:])
+# sys.exit()
+
+# Define variable indices of array subset
+dictIdxSubset = dict(zip(varNamesAll, np.arange(len(varNamesAll))))
+
+# Create array of data limits in correct order
+varLimits = []
+for var in range(0,len(varNamesAll)):
+    varName = varNamesAll[var]
+    if varName == 'war':
+        dataLimits = WARlims
+    if varName == 'r_mean':
+        dataLimits = IMFlims
+    if varName == 'r_cmean':
+        dataLimits = MMlims
+    if varName == 'beta1':
+        dataLimits = beta1lims
+    if varName == 'beta2':
+        dataLimits = beta2lims
+    if varName == 'eccentricity':
+        dataLimits = ecclims        
+    varLimits.append(dataLimits)
+    
+#axesLimits = np.array([ecclims, WARlims, MMlims, beta1lims, beta2lims])
+axesLimits = np.array(varLimits)
 
 # Define surfaces of section
 minPercSec = 48
@@ -199,47 +248,49 @@ sectionIntervals = np.vstack((medianSectionStart,medianSectionEnd)).T
         # print(timeStampsSel[i-12])
 ################
 ############## HISTOGRAM SCALING BREAK
+plotHistScalingBreak = False
 
-indexScalingVar = dt.get_variable_indices('scaling_break', variableNames)
-scalingBreak = arrayStats[boolTot,indexScalingVar]
-scaleBreaks = np.unique(scalingBreak)
-bins = np.hstack((scaleBreaks-1,50))
+if plotHistScalingBreak:
+    indexScalingVar = dt.get_variable_indices('scaling_break', variableNames)
+    scalingBreak = arrayStats[boolTot,indexScalingVar]
+    scaleBreaks = np.unique(scalingBreak)
+    bins = np.hstack((scaleBreaks-1,50))
 
-counts, bins = np.histogram(scalingBreak, bins = bins)
-nrSamples = len(scalingBreak)
-counts = 100.0*counts/float(nrSamples)
-meanVal = np.nanmean(scalingBreak)
-medianVal = np.nanmedian(scalingBreak)
-stdVal = np.nanstd(scalingBreak)
-width = 0.4 * (bins[1] - bins[0])
-center = (bins[:-1] + bins[1:]) / 2.0
+    counts, bins = np.histogram(scalingBreak, bins = bins)
+    nrSamples = len(scalingBreak)
+    counts = 100.0*counts/float(nrSamples)
+    meanVal = np.nanmean(scalingBreak)
+    medianVal = np.nanmedian(scalingBreak)
+    stdVal = np.nanstd(scalingBreak)
+    width = 0.4 * (bins[1] - bins[0])
+    center = (bins[:-1] + bins[1:]) / 2.0
 
-# Plot hist
-axSb = plt.gca()
-print(scaleBreaks, counts)
-plt.bar(scaleBreaks, counts, align='center', width=width, color='blue', edgecolor='blue')
-textMedian = r'median = ' + str(medianVal)
-textMean = r'$\mu$ = ' + str("%0.2f" % meanVal)
-textStd = r'$\sigma$ = ' + str("%0.2f" % stdVal)
-plt.text(0.75, 0.95, textMedian, transform=axSb.transAxes, fontsize=14)
-plt.text(0.75, 0.91, textMean, transform=axSb.transAxes, fontsize=14)
-plt.text(0.75, 0.87, textStd, transform=axSb.transAxes, fontsize=14)
+    # Plot hist
+    axSb = plt.gca()
+    print(scaleBreaks, counts)
+    plt.bar(scaleBreaks, counts, align='center', width=width, color='blue', edgecolor='blue')
+    textMedian = r'median = ' + str(int(medianVal))
+    textMean = r'$\mu$ = ' + str("%0.2f" % meanVal)
+    textStd = r'$\sigma$ = ' + str("%0.2f" % stdVal)
+    plt.text(0.75, 0.95, textMedian, transform=axSb.transAxes, fontsize=14)
+    plt.text(0.75, 0.91, textMean, transform=axSb.transAxes, fontsize=14)
+    plt.text(0.75, 0.87, textStd, transform=axSb.transAxes, fontsize=14)
 
-maxPerc = 25
-plt.ylim([0, maxPerc])
-plt.xlabel('Scaling break [km]')
-plt.ylabel('Frequency [%]')
+    maxPerc = 25
+    plt.ylim([0, maxPerc])
+    plt.xlabel('Scaling break [km]')
+    plt.ylabel('Frequency [%]')
 
-#titleStr = 'Optimal scaling break \n' + product + ': ' + str(timeStampsDt[0]) + ' - ' + str(timeStampsDt[len(timeStampsDt)-1])
-titleStr = 'Optimal scaling break \n' + product + ': ' + str(timeStampsDt[0].year)
-plt.title(titleStr, fontsize=16)
-#plt.show()
+    #titleStr = 'Optimal scaling break \n' + product + ': ' + str(timeStampsDt[0]) + ' - ' + str(timeStampsDt[len(timeStampsDt)-1])
+    titleStr = 'Optimal scaling break \n' + product + ': ' + str(timeStampsDt[0].year)
+    plt.title(titleStr, fontsize=16)
+    #plt.show()
 
-fileName = outBaseDir + product + timeStartStr + '-' + timeEndStr +  '0_' + \
-'Rgt' + str(args.minR) + '_WOLS' + str(args.wols) + '_00005_histScaleBreak_warGt' + str("%0.1f" % warThreshold) + '_' + timeAccumMinStr + '.png'
-print('Saving: ',fileName)
-plt.savefig(fileName, dpi=300)
-sys.exit()
+    fileName = outBaseDir + product + timeStartStr + '-' + timeEndStr +  '0_' + \
+    'Rgt' + str(args.minR) + '_WOLS' + str(args.wols) + '_00005_histScaleBreak_warGt' + str("%0.1f" % warThreshold) + '_' + timeAccumMinStr + '.png'
+    print('Saving: ',fileName)
+    plt.savefig(fileName, dpi=300)
+#sys.exit()
 
 ########################################
 # Compute duration of event for colour scale
@@ -251,55 +302,91 @@ if daysFromStart > 5:
 else:
     timeFromStart = hoursFromStart
    
+# Adjust size of subplot for better visualization
+nrRows = len(varNamesRows)
+nrCols = len(varNamesCols)
+if (nrRows == 1) and ((nrCols == 3) or (nrCols == 4)):
+    nrRowsAdj = 2
+    nrColsAdj = 2
+elif (nrRows == 1) and (nrCols == 5):
+    nrRowsAdj = 2
+    nrColsAdj = 3
+else:
+    nrRowsAdj = nrRows
+    nrColsAdj = nrCols
+print('Number of subplots: ', nrRowsAdj, 'x', nrColsAdj)
+
 # Generate figure
 plt.close("all")
-fig = plt.figure(figsize=(11, 9.5))
+if nrRowsAdj == nrColsAdj:
+    sizeFig = (11, 9.5)
+else:
+    sizeFig = (13, 9.5)
+
+fig = plt.figure(figsize=sizeFig)
 ax = fig.add_axes()
 ax = fig.add_subplot(111)
 
-mpl.rc('xtick', labelsize=7) 
-mpl.rc('ytick', labelsize=7) 
 
+if nrRows == nrCols:
+    mpl.rc('xtick', labelsize=7) 
+    mpl.rc('ytick', labelsize=7)
+else:
+    mpl.rc('xtick', labelsize=12) 
+    mpl.rc('ytick', labelsize=12)
+ 
 from matplotlib.ticker import FormatStrFormatter
-
 p = 0
-subPlotNr = varData.shape[1]
-varNames = np.array(varNames)
-print('Number of subplots: ', subPlotNr, 'x',subPlotNr)
-for row in range(0,subPlotNr):
-    for col in range(0,subPlotNr): # loop first by changing the X axis variable and keeping the Y axis variable fixed
-        # log transform variables if necessary
-        # X variable
-        if ((varNames[col] == 'r_mean') or (varNames[col] == 'r_cmean') or (varNames[col] == 'war')) and boolLogPlot:
-            if (varNames[col] == 'r_mean') or (varNames[col] == 'r_cmean'):
+
+for row in range(0,nrRows):
+    for col in range(0,nrCols): # loop first by changing the X axis variable and keeping the Y axis variable fixed
+        ######## Select X and Y variable data
+        # Y variable (kept fixed for a given row)
+        varYname = varNamesRows[row]
+        idxColVar = dictIdxSubset[varYname]
+        if ((varNamesRows[row] == 'r_mean') or (varNamesRows[row] == 'r_cmean') or (varNamesRows[row] == 'war')) and boolLogPlot:
+            if (varNamesRows[row] == 'r_mean') or (varNamesRows[row] == 'r_cmean'):
                 offset = 0.005
-            elif varNames[col] == 'war':
+            elif varNamesRows[row] == 'war':
                 offset = 0.01
             else:
                 offset = 0.0
-            varX = 10*np.log10(varData[:,col] + offset)
-            varXLab = varLabels[col] + ' [dB]'
+            varY = 10*np.log10(varData[:,idxColVar] + offset)
+            varYLab = varLabels[idxColVar] + ' [dB]'
+        elif varNamesRows[row] == 'eccentricity' and boolPowPlotEccentricity:
+                varY = 10**varData[:,idxColVar]
+                varYLab = '10^(' + varLabels[idxColVar] + ')'
         else:
-            varX = varData[:,col]
-            varXLab = varLabels[col]
-        # Y variable
-        if ((varNames[row] == 'r_mean') or (varNames[row] == 'r_cmean') or (varNames[row] == 'war')) and boolLogPlot:
-            if (varNames[row] == 'r_mean') or (varNames[row] == 'r_cmean'):
+            varY = varData[:,idxColVar]
+            varYLab = varLabels[idxColVar]
+            
+        # X variable (will vary along the columns of the plot)          
+        varXname = varNamesCols[col]
+        idxRowVar = dictIdxSubset[varXname]
+        if ((varNamesCols[col] == 'r_mean') or (varNamesCols[col] == 'r_cmean') or (varNamesCols[col] == 'war')) and boolLogPlot:
+            if (varNamesCols[col] == 'r_mean') or (varNamesCols[col] == 'r_cmean'):
                 offset = 0.005
-            elif varNames[row] == 'war':
+            elif varNamesCols[col] == 'war':
                 offset = 0.01
             else:
                 offset = 0.0
-            varY = 10*np.log10(varData[:,row] + offset)
-            varYLab = varLabels[row] + ' [dB]'
+            varX = 10*np.log10(varData[:,idxRowVar] + offset)
+            varXLab = varLabels[idxRowVar] + ' [dB]'
+        elif varNamesCols[col] == 'eccentricity' and boolPowPlotEccentricity:
+            varX = 10**varData[:,idxRowVar]
+            varXLab = '10^(' + varLabels[idxRowVar] + ')'
         else:
-            varY = varData[:,row]
-            varYLab = varLabels[row]
-        
+            varX = varData[:,idxRowVar]
+            varXLab = varLabels[idxRowVar]
+
+        #########################################
+        if nrRows == nrCols:
+            ftSize = 8
+        else:
+            ftSize = 12
         # Plot number...
         p = p+1
-        print('Drawing subplot at row,col=', row, ',',col, ' - ', varLabels[row], ' vs ', varLabels[col])
-        axSP = plt.subplot(subPlotNr, subPlotNr, p)
+        axSP = plt.subplot(nrRowsAdj, nrColsAdj, p)
         
         if (varYLab == r'$\beta_1$') or (varYLab == r'$\beta_2$') or (varYLab == 'IMF'):
             axSP.yaxis.set_major_formatter(FormatStrFormatter('%.1f'))
@@ -314,7 +401,8 @@ for row in range(0,subPlotNr):
         ymax = np.max(varY)
         
         ############ Plot attractor trajectories or sections
-        if (row > col):
+        if (row > col) and (nrRows == nrCols):
+            print('Drawing ', trajectoryPlot,' at row, col=', row, ',',col, ' - ', varLabels[row], ' vs ', varLabels[col])
             titleStrSP = 'r=' + '%.2f' % r
             if trajectoryPlot == 'coloredlines':
                 # Construct segments
@@ -334,7 +422,7 @@ for row in range(0,subPlotNr):
                 
             ############# Plot sections
             if trajectoryPlot == 'sections':
-                idxLabs = np.where(np.logical_and(varNames != varNames[col],varNames != varNames[row]))
+                idxLabs = np.where(np.logical_and(varNamesAll != varNamesAll[col],varNamesAll != varNamesAll[row]))
                 
                 # The section is defined by fixing an interval on the third variable
                 idxVar3 = idxLabs[0][0]
@@ -384,7 +472,11 @@ for row in range(0,subPlotNr):
             plt.title(titleStrSP, fontsize=9)
         
         ############# Plot 2d histogram or kernel density
-        if (row < col):
+        criterion_NxN = ((row < col) and (nrRows == nrCols))
+        criterion_NxP = ((nrRows != nrCols) and ((col != 0) or (row != 0)))
+
+        if criterion_NxN or criterion_NxP:
+            print('Drawing ', densityPlot,' at row, col=', row, ',',col, ' - ', varLabels[row], ' vs ', varLabels[col])
             # Compute correlation
             beta, intercept, r_beta, p_value, std_err = stats.linregress(varX, varY)
             if densityPlot == 'kde':
@@ -432,30 +524,40 @@ for row in range(0,subPlotNr):
                 # Directly plot histogram
                 #plt.hist2d(varX, varY, bins=20, cmin=1, cmap=cmapHist) #, norm=LogNorm()) # gist_ncar, jet, spectral
                 
-                plt.xlim(axesLimits[col,0],axesLimits[col,1])
-                plt.ylim(axesLimits[row,0],axesLimits[row,1])
+                axSP.set_xlim(axesLimits[col,0],axesLimits[col,1])
+                axSP.set_ylim(axesLimits[row,0],axesLimits[row,1])
+                
+                #axSP.set_aspect(1./ax.get_data_ratio())
+
                 corrText = 'R=' + str(fmt2 % r_beta)
-                if np.abs(r_beta) > 0.4:
+                if np.abs(r_beta) > 0.3:
                     colore = 'red'
                 else:
                     colore = 'black'
                 axSb = plt.gca()
-                plt.text(0.74, 0.93, corrText, transform=axSb.transAxes, fontsize=8, color=colore,bbox=dict(facecolor='white', edgecolor='black', pad=1.0))
+                plt.text(0.74, 0.93, corrText, transform=axSb.transAxes, fontsize=ftSize, color=colore,bbox=dict(facecolor='white', edgecolor='black', pad=1.0))
             
         # Plot time series on the diagonal
-        if (row == col) and (len(varX) <= 288*1): # plot max 5 days
+        criterion_NxN = (row == col) and (len(varX) <= 288*1) and (nrRows == nrCols)
+        
+        if criterion_NxN: # plot max 5 days
             axDiag=plt.gca()
             plt.tick_params(bottom = 'off')
             plt.xticks(rotation=90)
             axDiag.plot(timeStampsDt, varY, 'b-')
             xfmt = md.DateFormatter('%H') #'%Y-%m-%d %H:%M:%S'
             axDiag.xaxis.set_major_formatter(xfmt)
+            
         # Plot 1d histogram
-        if (row == col) and (len(varX) > 288*1):
+        criterion_NxN = (row == col) and (len(varX) > 288*1) and (nrRows == nrCols)
+        criterion_NxP = ((nrRows != nrCols) and row == 0 and col == 0)
+        
+        if criterion_NxN or criterion_NxP:
             # Compute 1d histogram
             counts, bins = np.histogram(varY, bins=nrBinsY, range=axesLimits[row,:])
             nrSamples = len(varY)
             counts = 100.0*counts/float(nrSamples)
+            medianVal = np.nanmedian(varY)
             meanVal = np.nanmean(varY)
             stdVal = np.nanstd(varY)
             width = 0.4 * (bins[1] - bins[0])
@@ -464,23 +566,31 @@ for row in range(0,subPlotNr):
             # Plot hist
             axSb = plt.gca()
             plt.bar(center, counts, align='center', width=width, color='blue', edgecolor='blue')
+            textMedian = r'median = ' + str("%0.2f" % medianVal)
             textMean = r'$\mu$ = ' + str("%0.2f" % meanVal)
             textStd = r'$\sigma$ = ' + str("%0.2f" % stdVal)
-            plt.text(0.05, 0.90, textMean, transform=axSb.transAxes, fontsize=8)
-            plt.text(0.05, 0.84, textStd, transform=axSb.transAxes, fontsize=8)
-            maxPerc = 12
+            plt.text(0.05, 0.90, textMedian, transform=axSb.transAxes, fontsize=ftSize)
+            plt.text(0.05, 0.84, textMean, transform=axSb.transAxes, fontsize=ftSize)
+            plt.text(0.05, 0.78, textStd, transform=axSb.transAxes, fontsize=ftSize)
+            maxPerc = 15
             plt.ylim([0, maxPerc])
         # Axis labels
-        if col == 0:
+        if col == 0 and (nrRows == nrCols):
             plt.ylabel(varYLab, fontsize=12)
-        if row == subPlotNr-1:
+        if (row == nrRows-1) and (nrRows == nrCols):
             plt.xlabel(varXLab, fontsize=12)
-        if row == 0:
+        if row == 0 and (nrRows == nrCols):
             plt.title(varXLab, fontsize=12)
-        if col == subPlotNr-1:
+        if (col == nrCols-1) and (nrRows == nrCols):
             axSP.yaxis.set_label_position("right")
             plt.ylabel(varYLab, fontsize=12)
-        
+        # Axis labels for non square subplot matrix
+        if (nrRows != nrCols):
+            plt.xlabel(varXLab, fontsize=12)
+            plt.ylabel(varYLab, fontsize=12)
+            if row == 0 and col == 0:
+                plt.ylabel('Frequency [%]', fontsize=12)
+
 fig.tight_layout()
 fig.subplots_adjust(top=0.92, right=0.8)
 

@@ -54,8 +54,12 @@ def get_variable_indices(subsetVariableNames, listVariableNames):
     '''
     Function to return the linear indices of the subset of variables in a longer list of variables
     '''
+
     if type(subsetVariableNames) is not list:
-        subsetVariableNames = [subsetVariableNames]
+        if len(subsetVariableNames) == 1:
+            subsetVariableNames = [subsetVariableNames]
+        else:
+            subsetVariableNames = subsetVariableNames.tolist()
         
     nrVarTot = len(listVariableNames)
     nrVarSubset = len(subsetVariableNames)
@@ -518,4 +522,11 @@ def percentiles(array, percentiles):
         perc = np.percentile(array,percentiles[p])
         percentilesArray.append(perc)
     percentilesArray = np.array(percentilesArray)
+    
+def unique(array):
+    ''' 
+    Overload of numpy unique function to obtain the values in the same order they appear in the array (no sorting)
+    '''
+    uniq, index = np.unique(array, return_index=True)
+    return uniq[index.argsort()]
     return(percentilesArray)
