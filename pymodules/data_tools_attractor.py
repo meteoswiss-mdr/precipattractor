@@ -111,7 +111,7 @@ def compute_war(rainfield, rainThreshold, noData):
         war = -1
     return war
     
-def rainrate2reflectivity(rainrate, A, b, zerosDBZ):
+def rainrate2reflectivity(rainrate, A, b, zerosDBZ = 'auto'):
     zerosIdx = rainrate == 0
     rainIdx = rainrate > 0
     
