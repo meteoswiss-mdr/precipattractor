@@ -105,6 +105,13 @@ def write_csv(fileName, headers, dataArray):
     csvOut.writerows(dataArray)
     f.close()
 
+def write_csv_matrix(fileName, dataArray):
+    f = open(fileName, 'w')
+    csvOut = csv.writer(f)
+    
+    csvOut.writerows(dataArray)
+    f.close()
+
 # Read-in list of CSV or NETCDF files containing radar rainfall statistics
 def csv_list2array(timeStart, timeEnd, inBaseDir, analysisType='STATS', product='AQC', quality=0, timeAccumMin=5, minR=0.08, wols=0, variableBreak=0):
     timeAccumMinStr = '%05i' % (timeAccumMin)

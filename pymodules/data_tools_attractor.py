@@ -111,7 +111,7 @@ def compute_war(rainfield, rainThreshold, noData):
         war = -1
     return war
     
-def rainrate2reflectivity(rainrate, A, b):
+def rainrate2reflectivity(rainrate, A, b, zerosDBZ):
     zerosIdx = rainrate == 0
     rainIdx = rainrate > 0
     
@@ -121,17 +121,24 @@ def rainrate2reflectivity(rainrate, A, b):
         minRainRate = np.min(rainrate[rainIdx])
     else:
         minRainRate = 0.012 # 0.0115537519713
-    minDBZ = 10.0*np.log10(A*minRainRate+b)
-    
+    minDBZ = 10.0*np.log10(A*minRainRate**b)
+
     # Compute reflectivity
     dBZ = -999.0*np.ones(rainrate.shape)
-    dBZ[rainIdx] = 10.0*np.log10(A*rainrate[rainIdx]+b)
+    dBZ[rainIdx] = 10.0*np.log10(A*rainrate[rainIdx]**b)
     
-    # Replace zero rainrate by the minimum observed reflectivity
-    dBZ[zerosIdx] = minDBZ
+    # Replace zero rainrate by the minimum observed reflectivity or set it by hand to a fixed value
+    if zerosDBZ == 'auto':
+        dBZ[zerosIdx] = minDBZ
+    else:
+        dBZ[zerosIdx] = zerosDBZ
     
-    return dBZ
+    return dBZ, minDBZ, minRainRate
     
+def reflectivity2rainrate(reflectivityDBZ, A, b):
+    rainrate = (10.0**(reflectivityDBZ/10.0)/A)**(1.0/b)
+    return(rainrate)
+  
 def get_rainfall_lookuptable(noData):
     precipIdxFactor=71.5
     lut = np.zeros(256)
@@ -157,7 +164,24 @@ def get_colorlist(type):
         clevs= [0,0.08,0.16,0.25,0.40,0.63,1,1.6,2.5,4,6.3,10,16,25,40,63,100,160]
         
     return(color_list, clevs)
+   
+def myLogFormat(y,pos):
+    '''
+    Function to format the ticks labels of a loglog plot
+    from 10^-1,10^0, 10^1, 10^2 to 0.1, 1, 10, 100
+    Use as:
+    axSP.xaxis.set_major_formatter(ticker.FuncFormatter(dt.myLogFormat))
+    axSP.yaxis.set_major_formatter(ticker.FuncFormatter(dt.myLogFormat))
+    '''
+    
+    # Find the number of decimal places required
+    decimalplaces = int(np.maximum(-np.log10(y),0))     # =0 for numbers >=1
+    # Insert that number into a format string
+    formatstring = '{{:.{:1d}f}}'.format(decimalplaces)
+    # Return the formatted tick label
+    return formatstring.format(y)
 
+    
 def compute_beta(logScale, logPower):
     beta, intercept, r_beta, p_value, std_err = stats.linregress(logScale, logPower)
     return(beta, intercept, r_beta)
