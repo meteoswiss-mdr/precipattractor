@@ -145,47 +145,6 @@ def extract_middle_domain(rainfield, domainSizeX, domainSizeY):
     rainfieldDomain = rainfield[mask==1].reshape(domainSizeY,domainSizeX)
     
     return(rainfieldDomain)
-    
-def rainrate2reflectivity(rainrate, A, b, zerosDBZ = 'auto'):
-    zerosIdx = rainrate == 0
-    rainIdx = rainrate > 0
-    
-    # Compute or set minimum reflectivity
-    nrRainPixels = np.sum(rainIdx)
-    if nrRainPixels >= 10:
-        minRainRate = np.min(rainrate[rainIdx])
-    else:
-        minRainRate = 0.012 # 0.0115537519713
-    minDBZ = 10.0*np.log10(A*minRainRate**b)
-
-    # Compute reflectivity
-    dBZ = -999.0*np.ones(rainrate.shape)
-    dBZ[rainIdx] = 10.0*np.log10(A*rainrate[rainIdx]**b)
-    
-    # Replace zero rainrate by the minimum observed reflectivity or set it by hand to a fixed value
-    if zerosDBZ == 'auto':
-        dBZ[zerosIdx] = minDBZ
-    else:
-        dBZ[zerosIdx] = zerosDBZ
-    
-    return dBZ, minDBZ, minRainRate
-    
-def reflectivity2rainrate(reflectivityDBZ, A, b):
-    rainrate = (10.0**(reflectivityDBZ/10.0)/A)**(1.0/b)
-    return(rainrate)
-  
-def get_rainfall_lookuptable(noData):
-    precipIdxFactor=71.5
-    lut = np.zeros(256)
-    for i in range(0,256):
-        if (i < 2) or (i > 250 and i < 255):
-            lut[i] = 0.0
-        elif (i == 255):
-            lut[i] = noData
-        else:
-            lut[i] = (10.**((i-(precipIdxFactor))/20.0)/316.0)**(0.6666667)
-    
-    return lut
 
 def get_colorlist(type):
     if type == 'STEPS':
