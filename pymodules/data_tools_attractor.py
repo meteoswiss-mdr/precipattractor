@@ -145,22 +145,6 @@ def extract_middle_domain(rainfield, domainSizeX, domainSizeY):
     rainfieldDomain = rainfield[mask==1].reshape(domainSizeY,domainSizeX)
     
     return(rainfieldDomain)
-
-<<<<<<< HEAD
-=======
-def compute_war(rainfield, rainThreshold, noData):
-    idxRain = rainfield >= rainThreshold
-    idxRadarDomain = rainfield > noData + 1
-    
-    if (len(idxRain) >= 0) and (len(idxRain) < sys.maxsize) and \
-    (len(idxRadarDomain) >= 0) and (len(idxRadarDomain) < sys.maxsize) \
-    and (np.sum(idxRain) <= np.sum(idxRadarDomain)) and (np.sum(idxRadarDomain) > 0):
-        war = 100.0*np.sum(idxRain)/np.sum(idxRadarDomain)
-    else:
-        print("Problem in the computation of WAR. idxRain = ", idxRain, " and idxRadarDomain = ", idxRadarDomain, " are not valid values.")
-        print("WAR set to -1")
-        war = -1
-    return war
     
 def rainrate2reflectivity(rainrate, A, b, zerosDBZ = 'auto'):
     zerosIdx = rainrate == 0
@@ -203,7 +187,6 @@ def get_rainfall_lookuptable(noData):
     
     return lut
 
->>>>>>> fb2c7a292f8e4b8e2aaa32ac4314b9d5c2333187
 def get_colorlist(type):
     if type == 'STEPS':
         color_list = ['cyan','deepskyblue','dodgerblue','blue','chartreuse','limegreen','green','darkgreen','yellow','gold','orange','red','magenta','darkmagenta']
