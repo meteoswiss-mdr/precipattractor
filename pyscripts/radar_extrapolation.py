@@ -20,6 +20,7 @@ import cv2
 import time_tools_attractor as ti
 import io_tools_attractor as io
 import data_tools_attractor as dt
+import stat_tools_attractor as st
 
 # optical flow libraries
 import optical_flow as of
@@ -188,42 +189,54 @@ for i in range(nStacks-1,-1*net-1,-1):
             rain8bit = dt.extract_middle_domain(rain8bit, domainSize[1], domainSize[0])
             # rainrate = rainrate[150:350,50:250]
             # rain8bit = rain8bit[150:350,50:250]
+            
             # Create mask radar composite
             mask = np.ones(rainrate.shape)
             mask[rainrate != noData] = np.nan
             mask[rainrate == noData] = 1         
 
             # Compute WAR
-            war = dt.compute_war(rainrate,rainThreshold, noData)
+            war = st.compute_war(rainrate,rainThreshold, noData)
             
         except IOError:
             print('File ', fileName, ' not readable')
             war = -1
                       
         if (war >= 0.01 or i < 0):
-        
+            
+            # -999 to nan
+            rainrate[rainrate < 0] = np.nan 
+            rainratePlot = np.copy(rainrate)
+            
+            # Set lowest rain thresholds
+            rainThreshold = 0.08
+            condition = rainrate < rainThreshold
+            rainrate[condition] = rainThreshold
+            
             # Compute corresponding reflectivity
             A = 316.0
             b = 1.5
-            dBZ = dt.rainrate2reflectivity(rainrate,A,b)
-            
-            condition = rainrate <= rainThreshold
-            rainrate[condition] = np.nan 
-            dBZ[condition] = np.nan  
-            # Replace NaNs with zeros
+            dBZ,mindBZ,_  = dt.rainrate2reflectivity(rainrate,A,b)
+            dBZ[condition] = 0
+            dBZ[dBZ==-999] = 0
             rainfieldZeros = dBZ.copy()
-            rainfieldZeros[np.isnan(rainfieldZeros)] = 0.0 
+            
+            # nan with zeros
+            rainfieldZeros[np.isnan(rainfieldZeros)] = 0
             
             # remove small noise with a morphological operator (opening)
             rainfieldZeros = of.morphological_opening(rainfieldZeros, thr=rainThreshold, n=5)
+            
+            # scale values between 0 and 255
+            rainfieldZeros *= 255.0/rainfieldZeros.max()
             
             # Move rainfall field down the stack
             nrValidFields = nrValidFields + 1
             rainfallStack[1,:,:] = rainfallStack[0,:]
             rainfallStack[0,:,:] = rainfieldZeros
-            
+                        
             # Stack image for plotting
-            zStack.append(rainrate)
+            zStack.append(rainratePlot)
             tStack.append(timeLocal)
             
             ########### Compute optical flow on these two images
@@ -232,11 +245,7 @@ for i in range(nStacks-1,-1*net-1,-1):
                 # extract consecutive images
                 prvs = rainfallStack[1,:,:]
                 next = rainfallStack[0,:,:]
-                
-                # scale values between 0 and 255
-                prvs *= 255.0/prvs.max()   
-                next *= 255.0/next.max()   
-                
+
                 # 8-bit int
                 prvs = np.ndarray.astype(prvs,'uint8')
                 next = np.ndarray.astype(next,'uint8') 
@@ -393,7 +402,7 @@ try:
             rainIm = plt.imshow(z, cmap=cmap, norm=norm, interpolation='nearest')
             cbar = plt.colorbar(rainIm, ticks=clevs, spacing='uniform', norm=norm, extend='max', fraction=0.03)
             cbar.set_ticklabels(clevsStr, update_ticks=True)
-            cbar.set_label("mm/hr equiv.")   
+            cbar.set_label("mm/hr")   
             if (it > nStacks-1):
                 plt.quiver(xs,ys,Us,Vs,angles = 'xy', scale_units='xy')
             plt.imshow(edgedStack[it],cmap='Greys_r',interpolation='nearest')
