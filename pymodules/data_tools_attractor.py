@@ -103,13 +103,20 @@ def get_variable_indices(subsetVariableNames, listVariableNames):
     '''
     Function to return the linear indices of the subset of variables in a longer list of variables
     '''
-
+    
+    # Transforms input variables to lists if necessary
     if type(subsetVariableNames) is not list:
-        if len(subsetVariableNames) == 1:
-            subsetVariableNames = [subsetVariableNames]
-        else:
+        if type(subsetVariableNames) is np.ndarray:
             subsetVariableNames = subsetVariableNames.tolist()
-        
+        else:
+            subsetVariableNames = [subsetVariableNames]
+            
+    if type(listVariableNames) is not list:
+        if type(listVariableNames) is np.ndarray:
+            listVariableNames = listVariableNames.tolist()
+        else:
+            listVariableNames = [listVariableNames]
+    
     nrVarTot = len(listVariableNames)
     nrVarSubset = len(subsetVariableNames)
 

@@ -382,3 +382,21 @@ def plot_bars(x_bar, y_bar, eigvals, eigvecs, ax, colour='white'):
     ax.plot(*_make_lines(eigvals, eigvecs, mean, -1), marker='o', color=colour)
     ax.axis('image')
 ########################
+
+def update_mean(data, newSample):
+    '''
+    Algorithm to compute the online mean.
+    '''
+    oldMean = np.nanmean(data)
+    n = np.sum(~np.isnan(data))
+    
+    n += 1
+    # Contribution of the new sample to the old mean
+    delta = newSample - oldMean 
+    # Update of the old mean
+    newMean += delta/n 
+
+    if n < 2:
+        return float('nan')
+    else:
+        return newMean
