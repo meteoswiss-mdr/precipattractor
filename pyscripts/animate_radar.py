@@ -36,6 +36,7 @@ usrName = getpass.getuser()
 import time_tools_attractor as ti
 import io_tools_attractor as io
 import data_tools_attractor as dt
+import stat_tools_attractor as st
 
 import radialprofile
 import gis_base as gis
@@ -237,60 +238,27 @@ while timeLocal <= timeEnd:
             mask[rainrate != noData] = np.nan
             mask[rainrate == noData] = 1
             
-            # Set lowest rain thresholds
-            if (args.minR > 0.0) and (args.minR < 500.0):
-                rainThresholdWAR = args.minR
-                rainThresholdPlot = args.minR
-                rainThresholdStats = args.minR
-            else: # default minimum rainfall rate
-                rainThresholdWAR = 0.08
-                rainThresholdPlot = 0.08
-                rainThresholdStats = 0.08
+            # -999 to nan
+            rainrate[rainrate < 0] = np.nan 
             
-            # Compute WAR
-            war = dt.compute_war(rainrate,rainThresholdWAR, noData)
+            # Set lowest rain thresholds
+            rainThreshold = 0.08
+            condition = rainrate < rainThreshold
+            rainrate[condition] = rainThreshold
             
             # Set all the non-rainy pixels to NaN (for plotting)
             rainratePlot = np.copy(rainrate)
-            condition = rainratePlot <= rainThresholdPlot
             rainratePlot[condition] = np.nan
             
-            # Set all the data below a rainfall threshold to NaN (for conditional statistics)
-            rainrateC = np.copy(rainrate)
-            condition = rainrateC <= rainThresholdStats
-            rainrateC[condition] = np.nan
             
-            # Set all the -999 to NaN (for unconditional statistics)
-            condition = rainrate < rainThresholdStats
-            rainrate[condition] = np.nan
+            war = 1
         except IOError:
             print('File ', fileName, ' not readable')
             war = -1
             
-        if war >= 0:
-            # Compute corresponding reflectivity
-            A = 316.0
-            b = 1.5
-            dBZ = dt.rainrate2reflectivity(rainrate,A,b)
-            
-            condition = rainrateC <= rainThresholdStats
-            dBZC = np.copy(dBZ)
-            dBZC[condition] = np.nan
-            dBZ[condition] = np.nan
-            
-            # Replaze NaNs with zeros for Fourier and optical flow
-            if (fourierVar == 'rainrate'):
-                rainfieldZeros = rainrate.copy()
-            elif (fourierVar == 'dbz'):
-                rainfieldZeros = dBZ.copy()
-            else:
-                print('Invalid variable string for Fourier transform')
-                sys.exit()
-            
-            rainfieldZeros[rainfieldZeros == noData] = 0.0 # set 0 dBZ for zeros???
-            
-            
-            ############# PLOTTING RAINFIELD AND SPECTRUM #################################
+        if war == 1:
+                  
+            ############# PLOTTING #################################
             plt.close("all")
             fig = plt.figure(figsize=(9,7.5))
             
