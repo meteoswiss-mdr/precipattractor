@@ -48,7 +48,7 @@ def from_dB(array):
         linearArray = linearArray.tolist()
     return(linearArray)
     
-def rainrate2reflectivity(rainrate, A, b, zerosDBZ='auto'):
+def rainrate2reflectivity(rainrate, A=316.0, b=1.5, zerosDBZ='auto'):
 
     isList = isinstance(rainrate, list)
     if isList == True:
@@ -77,11 +77,11 @@ def rainrate2reflectivity(rainrate, A, b, zerosDBZ='auto'):
     
     return dBZ, minDBZ, minRainRate
     
-def reflectivity2rainrate(reflectivityDBZ, A, b):
+def reflectivity2rainrate(reflectivityDBZ, A=316.0, b=1.5):
     rainrate = (10.0**(reflectivityDBZ/10.0)/A)**(1.0/b)
     return(rainrate)
   
-def get_rainfall_lookuptable(noData):
+def get_rainfall_lookuptable(noData, A=316.0, b=1.5):
     precipIdxFactor=71.5
     lut = np.zeros(256)
     for i in range(0,256):
@@ -90,7 +90,7 @@ def get_rainfall_lookuptable(noData):
         elif (i == 255):
             lut[i] = noData
         else:
-            lut[i] = (10.**((i-(precipIdxFactor))/20.0)/316.0)**(0.6666667)
+            lut[i] = (10.**((i-(precipIdxFactor))/20.0)/A)**(1.0/b)
     
     return lut
 #########
@@ -239,3 +239,34 @@ def update_progress(progress,processName = "Progress"):
     text = "\r{0}: [{1}] {2}% {3}".format(processName, "#"*block + "-"*(barLength-block), int(progress*100), status)
     sys.stdout.write(text)
     sys.stdout.flush()
+    
+def optimal_size_subplot(nrPlots):
+    if nrPlots == 1:
+        nrRows = 1
+        nrCols = 1
+    elif nrPlots == 2:
+        nrRows = 1
+        nrCols = 2
+    elif nrPlots == 3 or nrPlots == 4:
+        nrRows = 2
+        nrCols = 2
+    elif nrPlots == 5 or nrPlots == 6:
+        nrRows = 2
+        nrCols = 3
+    elif nrPlots >= 7 and nrPlots <= 9:
+        nrRows = 3
+        nrCols = 3
+    elif nrPlots >= 8 and nrPlots <= 12:
+        nrRows = 3
+        nrCols = 4
+    elif nrPlots >= 13 and nrPlots <= 15:
+        nrRows = 3
+        nrCols = 5
+    elif nrPlots >= 16 and nrPlots <= 20:
+        nrRows = 4
+        nrCols = 5
+    else:
+        nrRows = int(np.sqrt(nrPlots))
+        nrCols = int(np.sqrt(nrPlots))+1
+    
+    return(nrRows, nrCols)

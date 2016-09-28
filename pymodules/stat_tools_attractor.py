@@ -16,6 +16,7 @@ import sys
 import time
 import numpy as np
 import math
+import pywt
 
 from scipy import stats
 import scipy.ndimage as ndimage
@@ -400,3 +401,82 @@ def update_mean(data, newSample):
         return float('nan')
     else:
         return newMean
+        
+def generate_wavelet_noise(rainfield, wavelet='db4', nrLevels=6, level2perturb='all', nrMembers=1):
+    '''
+    First naive attempt to generate stochastic noise using wavelets
+    '''
+    fieldSize = rainfield.shape
+    
+    # Decompose rainfall field
+    coeffsRain = pywt.wavedec2(rainfield, wavelet, level=nrLevels)
+    
+    stochasticEnsemble = []
+    for member in range(0,nrMembers):
+        # Generate and decompose noise field
+        noisefield = np.random.randn(fieldSize[0],fieldSize[1])
+        coeffsNoise = pywt.wavedec2(noisefield, wavelet, level=nrLevels)
+        
+        if level2perturb == 'all':
+            levels2perturbList = np.arange(1,nrLevels).tolist()
+        else:
+            if type(level2perturb) == int:
+                levels2perturbList = [level2perturb]
+            elif type(level2perturb) == np.ndarray:
+                levels2perturbList = level2perturb.to_list()
+            elif type(level2perturb) == list:
+                levels2perturbList = level2perturb
+            else:
+                print('List of elvels to perturb in generate_wavelet_noise is not in the right format.')
+                sys.exit(0)
+        
+        # Multiply the wavelet coefficients of rainfall and noise fields at each level
+        for level in levels2perturbList:
+            # Get index of the level since data are organized in reversed order
+            levelReversed = nrLevels - level
+            
+            # Get coefficients of noise field at given level
+            coeffsNoise[levelReversed] = list(coeffsNoise[levelReversed])
+            
+            # Get coefficients of rain field at given level
+            coeffsRain[levelReversed] = list(coeffsRain[levelReversed])
+            
+            # Perturb rain coefficients with noise coefficients
+            rainCoeffLevel = np.array(coeffsRain[levelReversed][:])
+            noiseCoeffLevel = np.array(coeffsNoise[levelReversed][:])
+            
+            for direction in range(0,2):
+                # Compute z-scores
+                rainCoeffLevel_zscores,mean,stdev = to_zscores(rainCoeffLevel[direction])
+                noiseCoeffLevel_zscores,mean,stdev = to_zscores(noiseCoeffLevel[direction])
+                
+                #rainCoeffLevel_zscores = rainCoeffLevel[direction]
+                #noiseCoeffLevel_zscores = noiseCoeffLevel[direction]
+                
+                #print(rainCoeffLevel_zscores,noiseCoeffLevel_zscores)
+                coeffsRain[levelReversed][direction] = rainCoeffLevel[direction]*noiseCoeffLevel[direction] #rainCoeffLevel_zscores#*noiseCoeffLevel_zscores
+            
+            # print(coeffsRain[levelReversed])
+            # sys.exit()
+            # Replace the rain coefficients with the perturbed coefficients
+            coeffsRain[levelReversed] = tuple(coeffsRain[levelReversed])
+        
+        # Reconstruct perturbed rain field
+        stochasticRain = pywt.waverec2(coeffsRain, wavelet)
+        
+        # Append ensemble members
+        stochasticEnsemble.append(stochasticRain)
+    
+    return stochasticEnsemble
+    
+def to_zscores(data):
+    mean = np.nanmean(data)
+    stdev = np.nanstd(data)
+    
+    zscores = (data - mean)/stdev
+    
+    return zscores, mean, stdev
+    
+def from_zscores(data, mean, stdev):
+    data = zscores*stdev + mean
+    return data
