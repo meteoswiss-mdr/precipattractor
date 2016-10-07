@@ -8,7 +8,7 @@ import argparse
 from PIL import Image
 
 import matplotlib as mpl
-mpl.use('Agg')
+#mpl.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -25,6 +25,7 @@ from scipy import fftpack,stats
 import scipy.signal as ss
 import scipy.ndimage as ndimage
 import pywt
+from pyearth import Earth
 
 import getpass
 usrName = getpass.getuser()
@@ -54,6 +55,8 @@ inBaseDir = '/scratch/' + usrName + '/data/' # directory to read from
 outBaseDir = '/store/msrad/radar/precip_attractor/data/'
 fourierVar = 'dbz' # field on which to perform the fourier analysis ('rainrate' or 'dbz')
 scalingBreakArray_KM = np.arange(6, 42, 2) # [15]
+maxBeta1rangeKM = 512
+minBeta2rangeKM = 4
 fftDomainSize = 512
 FFTmod = 'NUMPY' # 'FFTW' or 'NUMPY'
 windowFunction = 'none' #'blackman' or 'none'
@@ -80,6 +83,9 @@ product = args.product
 weightedOLS = args.wols
 timeAccumMin = args.accum
 plotSpectrum = args.plt
+
+if type(scalingBreakArray_KM) != list and type(scalingBreakArray_KM) != np.ndarray:
+    scalingBreakArray_KM = [scalingBreakArray_KM]
 
 if len(scalingBreakArray_KM) > 1:
     variableBreak = 1
@@ -115,7 +121,12 @@ if (product == 'AQC') or (product == 'CPC'):
 else:
     print('Invalid -product argument.')
     sys.exit(1)
-
+    
+if fourierVar == 'rainrate':
+        unitsSpectrum = r"Rainfall field power $\left[ 10\mathrm{log}_{10}\left(\frac{(mm/hr)^2}{km}\right)\right]$"
+elif fourierVar == 'dbz':
+        unitsSpectrum = r"Reflectivity field power $\left[ 10\mathrm{log}_{10}\left(\frac{dBZ^2}{km}\right)\right]$"
+                        
 ###################################
 # Get dattime from timestamp
 timeStart = ti.timestring2datetime(timeStartStr)
@@ -292,14 +303,13 @@ while timeLocal <= timeEnd:
             # Compute corresponding reflectivity
             A = 316.0
             b = 1.5
-            zerosDBZ = 'auto'
-            dBZ, minDBZ, minRainRate = dt.rainrate2reflectivity(rainrate, A, b, zerosDBZ)
             
-            # Get corresponding rainrate from reflectivity
-            if zerosDBZ != 'auto':
-                minDBZ = zerosDBZ
-                
-            zeroRain = dt.reflectivity2rainrate(minDBZ, A, b)
+            # Take reflectivity value corresponding to minimum rainfall threshold as zero(0.08 mm/hr)
+            zerosDBZ,_,_ = dt.rainrate2reflectivity(rainThresholdWAR, A, b)
+            #zerosDBZ = 0.0
+            
+            # Convert rainrate to reflectivity
+            dBZ, minDBZ, minRainRate = dt.rainrate2reflectivity(rainrate, A, b, zerosDBZ)
             
             condition = rainrateC < rainThresholdStats
             dBZC = np.copy(dBZ)
@@ -314,10 +324,7 @@ while timeLocal <= timeEnd:
                 rainfieldZeros = dBZ.copy()
                 
                 # Very delicate choice on which dBZ value to give to the zeros...
-                if zerosDBZ == 'auto':
-                    rainfieldZeros[np.isnan(rainfieldZeros)] = minDBZ
-                else:
-                    rainfieldZeros[np.isnan(rainfieldZeros)] = zerosDBZ
+                rainfieldZeros[np.isnan(rainfieldZeros)] = zerosDBZ
                 
                 print('Minimum dBZ: ', minDBZ)
                 print('Zeros dBZ:', zerosDBZ)
@@ -333,7 +340,7 @@ while timeLocal <= timeEnd:
             
             ########### Compute Wavelet transform ###########
             if plotSpectrum == 'wavelets':
-                wavelet = 'db4'
+                wavelet = 'haar'
                 w = pywt.Wavelet(wavelet)
                 print(w)
                 # cA, (cH, cV, cD) = pywt.dwt2(rainfieldZeros, wavelet)
@@ -359,7 +366,8 @@ while timeLocal <= timeEnd:
                 fig = plt.figure(figsize=(ratioFig*figWidth,figWidth))
                 padding = 0.01
                 plt.subplots_adjust(hspace=0.05, wspace=0.01)
-                    
+                mpl.rcParams['image.interpolation'] = 'nearest'
+
                 # Plot rainfield
                 plt.subplot(nrRows, nrCols, 1)
                 PC = plt.imshow(rainfieldZeros, vmin=15, vmax=45)
@@ -468,10 +476,6 @@ while timeLocal <= timeEnd:
             ########### Compute Fourier power spectrum ###########
             ticFFT = time.clock()
             
-            #f1 = fftpack.fft2(rainfieldZeros) # Scipy implementation: It should be faster for large arrays
-            # Discrete Cosine Transform (useful representation of the data for PS estimation?)
-            #fprecip = fftpack.dct(rainfieldZeros, type=2, norm='ortho')
-            
             # Generate a window function
             if windowFunction == 'blackman':
                 w = ss.blackman(fftDomainSize)
@@ -502,8 +506,7 @@ while timeLocal <= timeEnd:
                 # Compute anisotropy from autocorrelation function
                 fftSizeSub = 255
                 percentileZero = 75
-                radius = -1
-                autocorrSub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs, percZero,_ = st.compute_fft_anisotropy(autocorr, fftSizeSub, percentileZero, rotation=False, radius=radius)
+                autocorrSub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs, percZero,_ = st.compute_fft_anisotropy(autocorr, fftSizeSub, percentileZero, rotation=False)
 
                 # Test to recompute 2d spectrum from autocorr function
                 # autocorrNoShift = np.fft.fft2(autocorrSub)
@@ -515,7 +518,7 @@ while timeLocal <= timeEnd:
                 # plt.imshow(10.0*np.log10(psd2d))
                 # plt.show()
                 # sys.exit()
-            if plotSpectrum == '2d' or plotSpectrum == '1d':
+            if plotSpectrum == '2d':
                 # Extract central region of 2d power spectrum and compute covariance
                 cov2logPS = True # Whether to compute the anisotropy on the log of the 2d PS
                 if cov2logPS:
@@ -524,7 +527,7 @@ while timeLocal <= timeEnd:
                     psd2d_anis = np.copy(psd2d)
                 
                 # Compute anisotropy from FFT spectrum
-                fftSizeSub = 255
+                fftSizeSub = 40#255
                 percentileZero = 90
                 smoothing_sigma = 3
                 psd2dsub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs, percZero, psd2dsubSmooth = st.compute_fft_anisotropy(psd2d_anis, fftSizeSub, percentileZero, sigma = smoothing_sigma)
@@ -558,11 +561,11 @@ while timeLocal <= timeEnd:
             r_beta2_best = 0
             for s in range(0,len(scalingBreakArray_KM)):
                 scalingBreak_KM = scalingBreakArray_KM[s]
-                largeScalesLims = np.array([512,scalingBreak_KM])
-                smallScalesLims = np.array([scalingBreak_KM,3])
+                largeScalesLims = np.array([maxBeta1rangeKM, scalingBreak_KM])
+                smallScalesLims = np.array([scalingBreak_KM, minBeta2rangeKM])
                 idxBeta1 = (wavelengthKm <= largeScalesLims[0]) & (wavelengthKm > largeScalesLims[1]) # large scales
                 idxBeta2 = (wavelengthKm <= smallScalesLims[0]) & (wavelengthKm > smallScalesLims[1]) # small scales
-                idxBetaBoth = (wavelengthKm <= largeScalesLims[0]) & (wavelengthKm > smallScalesLims[1]) # large scales
+                idxBetaBoth = (wavelengthKm <= largeScalesLims[0]) & (wavelengthKm > smallScalesLims[1]) # all scales
                 
                 #print('Nr points beta1 = ', np.sum(idxBeta1))
                 #print('Nr points beta2 = ', np.sum(idxBeta2))
@@ -614,51 +617,22 @@ while timeLocal <= timeEnd:
             else:
                 print("Fixed scaling break = ", scalingBreak_best, ' km')
                 
-            # # Test for computing betas with GLM
-            #import statsmodels.api as sm
-            #segmentsEndog = 10*np.log10(psd1d[idxBetaBoth])#np.column_stack([10*np.log10(psd1d[idxBeta1]),10*np.log10(psd1d[idxBeta2])]) 
-            # #segmentsExog = np.column_stack((10*np.log10(freq[idxBeta1]),10*np.log10(freq[idxBeta2])))
-            # breaks = [10.0*np.log10(1/256), 10.0*np.log10(1/15), 10.0*np.log10(1/3)]  # 0 adds slope for entire array 
-            # segmentsExog = np.column_stack([np.maximum(0, 10*np.log10(freq[idxBetaBoth]) - knot) for knot in breaks]) 
-            # result = sm.WLS(segmentsEndog, segmentsExog).fit()
-
-            # # print(result.params)
-            # # print(result.summary())
-
-            # nsample = len(psd1d[idxBetaBoth])
-            # groups = np.zeros(nsample, int)
-            # groups[20:40] = 1
-            # groups[40:] = 2
-            # dummy = (groups[:,None] == np.unique(groups)).astype(float)
-            # dummy = sm.categorical(groups, drop=True)
-            # X = np.column_stack((10.0*np.log10(freq[idxBetaBoth]), dummy))
-            # #print(X,segmentsEndog)
-            # res = sm.OLS(segmentsEndog, X).fit()
-            # #print(res.summary())
-            # prstd, iv_l, iv_u = sm.wls_prediction_std(res)
-            # sys.exit()
+            #### Fitting spectral slopes with MARS (Multivariate Adaptive Regression Splines)
+            model = Earth(max_degree = 1, max_terms = 2)
+            model.fit(dt.to_dB(freq[idxBetaBoth]), dt.to_dB(psd1d[idxBetaBoth]))
+            mars_fit = model.predict(dt.to_dB(freq[idxBetaBoth]))
             
-            # from sklearn import linear_model
-            # clf = linear_model.LassoLars(alpha=.1)
-            # clf.fit(10.0*np.log10(freq[idxBetaBoth]).reshape(-1, 1),10.0*np.log10(psd1d[idxBetaBoth]).reshape(-1, 1))  
-            # print(clf.coef_)
+            plt.scatter(dt.to_dB(freq),dt.to_dB(psd1d))
+            #plt.scatter(dt.to_dB(freq[idxBetaBoth]), dt.to_dB(psd1d[idxBetaBoth]))
+            plt.plot(dt.to_dB(freq[idxBetaBoth]), mars_fit)
+            plt.show()
             
-            # sys.exit()
-            # from scipy import interpolate,optimize
-            # def piecewise_linear(x, x0, y0, k1, k2):
-                # return np.piecewise(x, [x < x0], [lambda x:k1*x + y0-k1*x0, lambda x:k2*x + y0-k2*x0])
-            # p,e = optimize.curve_fit(piecewise_linear, 10*np.log10(freq[1:-10]), 10*np.log10(psd1d[1:-10]))
-            # print(p,e)
-            # sys.exit()
-            # tck = interpolate.splrep(10*np.log10(freq[idxBetaBoth]), 10*np.log10(psd1d[idxBetaBoth]), k=3, s=0)
-            # dev_2 = interpolate.splev(10*np.log10(freq[idxBetaBoth]), tck, der=2)
-            # turning_point_mask = dev_2 == np.amax(dev_2)
-            
-            #print('beta1: ', beta1, ', beta2: ', beta2)
-            #print(bin_centers)
-            #print(freq)
-            #print(10*np.log10(psd1d))
-            #print(nr_pixels)
+            print(model.trace())
+            print(model.summary())
+            print(model.basis_)
+            scalingBreak_MARS = str(model.basis_[2])[2:7]
+            scalingBreak_MARS_KM = 1.0/dt.from_dB(float(scalingBreak_MARS))
+            print("Best scaling break MARS = ", scalingBreak_MARS_KM, ' km')
             
             tocFFT = time.clock()
             #print('FFT time: ', tocFFT-ticFFT, ' seconds.')
@@ -888,7 +862,7 @@ while timeLocal <= timeEnd:
                         plt.gca().invert_yaxis()
                     cbar = plt.colorbar(imPS, ticks=clevsPS, spacing='uniform', norm=normPS, extend='max', fraction=0.03)
                     cbar.ax.tick_params(labelsize=14)
-                    cbar.set_label('Power [dB]', fontsize=15)
+                    cbar.set_label(unitsSpectrum, fontsize=15)
                     titleStr = str(timeLocal) + ', 2D power spectrum (rotated by 90$^\circ$)'
                     plt.title(titleStr, fontsize=titlesSize)
                 
@@ -938,12 +912,7 @@ while timeLocal <= timeEnd:
                     txt = 'Scaling break = ' + str(scalingBreak_best) + ' km'
                     psAx.text(startX,startY-6*offsetY, txt, transform=psAx.transAxes)
                     
-                    if zerosDBZ == 'auto':
-                        zeroValueDBZ = minDBZ
-                    else:
-                        zeroValueDBZ = zerosDBZ
-                    
-                    txt = 'Zeros = ' + (fmt1 % zeroValueDBZ) + ' dBZ - ' + (fmt2 % zeroRain) + ' mm/hr'
+                    txt = 'Zeros = ' + (fmt1 % zerosDBZ) + ' dBZ - ' + (fmt2 % rainThresholdWAR) + ' mm/hr'
                     psAx.text(startX,startY-7*offsetY, txt, transform=psAx.transAxes, fontsize=10)
                     
                     if plotSpectrum == '1dnoise':
@@ -958,10 +927,6 @@ while timeLocal <= timeEnd:
                     plt.title(titleStr, fontsize=titlesSize)
                     plt.xlabel("Wavelenght [km]", fontsize=15)
                     
-                    if fourierVar == 'rainrate':
-                        unitsSpectrum = r"Rainfall field power $\left[ 10\mathrm{log}_{10}\left(\frac{(mm/hr)^2}{km}\right)\right]$"
-                    elif fourierVar == 'dbz':
-                        unitsSpectrum = r"Reflectivity field power $\left[ 10\mathrm{log}_{10}\left(\frac{dBZ^2}{km}\right)\right]$"
                     plt.ylabel(unitsSpectrum, fontsize= 15)
                     
                     if fourierVar == 'rainrate':
@@ -1051,6 +1016,9 @@ while timeLocal <= timeEnd:
         # Write stats in the directory of previous day if last time stamp (midnight of next day)
         timePreviousDay = timeLocal - datetime.timedelta(days = 1)
         
+        # Get spectral slope limits for fitting
+        spectralSlopeLims = [maxBeta1rangeKM, minBeta2rangeKM]
+        
         # Generate filenames
         analysisType = 'STATS'
         if hourminStr == '0000':
@@ -1067,7 +1035,7 @@ while timeLocal <= timeEnd:
                 io.write_csv(fileNameStats, headers, dailyStats)
             elif args.format == 'netcdf':
                 # Write out NETCDF file
-                io.write_netcdf(fileNameStats, headers, dailyStats, str(rainThresholdWAR), str(weightedOLS))
+                io.write_netcdf(fileNameStats, headers, dailyStats, str(rainThresholdWAR), str(weightedOLS), spectralSlopeLims)
                 
             print(fileNameStats, ' saved.')
             

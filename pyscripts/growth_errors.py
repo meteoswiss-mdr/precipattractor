@@ -9,6 +9,7 @@ import sys
 
 import matplotlib as mpl
 mpl.use('Agg')
+from matplotlib import ticker
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import matplotlib.dates as md
@@ -36,6 +37,7 @@ fmt3 = "%.3f"
 inBaseDir = '/scratch/lforesti/data/' # '/store/msrad/radar/precip_attractor/data/' #'/scratch/lforesti/data/'
 outBaseDir = '/users/lforesti/results/'
 pltType = 'spread' #'evolution' 'spread'
+timeSampMin = 5
 
 ########GET ARGUMENTS FROM CMD LINE####
 parser = argparse.ArgumentParser(description='Plot radar rainfall field statistics.')
@@ -90,8 +92,9 @@ else:
 timeIntList = dt.get_column_list(arrayStats, 0)
 timeStamps_datetime = ti.timestring_array2datetime_array(timeIntList)
 
+nrSamples = len(arrayStats)
 timeStamps_absolute = []
-for t in range(0,len(timeStamps_datetime)):
+for t in range(0,nrSamples):
     absTime = ti.datetime2absolutetime(timeStamps_datetime[t])
     timeStamps_absolute.append(absTime)
     
@@ -113,6 +116,7 @@ if (len(arrayStats) == 0) & (args.format == 'netcdf'):
 
 #################################################################################
 ####################### ANALYSE GROWTH OF ERRORS
+varNames = ['war', 'r_cmean', 'r_mean', 'beta1', 'beta2', 'eccentricity']
 varNames = ['war', 'r_cmean', 'beta1', 'beta2']
 warThreshold = args.minWAR
 betaCorrThreshold = args.minCorrBeta
@@ -129,6 +133,8 @@ maxLeadTimeMin = 60*48
 initialCondIntervals = [0.5, 0.01, 0.05, 0.05]
 initialCondRange = [np.arange(5.0,55.0,5.0).tolist(),\
 np.arange(0.2,3.0,0.2).tolist(),\
+np.arange(0.2,3.0,0.2).tolist(),\
+np.arange(0.2,1.0,0.2).tolist(),\
 np.arange(1.5,2.5,0.1).tolist(),\
 np.arange(2.5,3.5,0.1).tolist()]
 
@@ -155,6 +161,8 @@ for var in range(0, len(varNames)):
             varLabels.append('MM [dB]')
         else:
             varLabels.append('MM')
+    if varNames[var] == 'eccentricity':
+            varLabels.append('Eccentricity')
     if varNames[var] == 'beta1':
         varLabels.append(r'$\beta_1$')
     if varNames[var] == 'beta2':
@@ -169,7 +177,7 @@ dictLabels = dict(zip(varNames, varLabels))
 # WAR threshold
 boolWAR = (arrayStats[:,dictIdx['war']] >= warThreshold) 
 # Beta correlation threshold
-boolBetaCorr = (arrayStats[:,dictIdx['beta1']+1] <= -betaCorrThreshold) & (arrayStats[:,dictIdx['beta2']+1] <= -betaCorrThreshold)
+boolBetaCorr = (np.abs(arrayStats[:,dictIdx['beta1']+1]) >= betaCorrThreshold) & (np.abs(arrayStats[:,dictIdx['beta2']+1]) <= -betaCorrThreshold)
 # Combination of thresholds
 boolTot = boolWAR & boolBetaCorr
 
@@ -204,13 +212,13 @@ timeStamps_absolute_subset = timeStamps_absolute[boolTot]
 
 # Compute summary stats for normalization and quantiles for automatic selection of initial conditions
 if useTrajectWholeArchive == False:
-    arrayStats_minPerc = np.nanpercentile(arrayStats_subset, 10, axis=0)
+    arrayStats_minPerc = np.nanpercentile(arrayStats_subset, 40, axis=0)
     arrayStats_maxPerc = np.nanpercentile(arrayStats_subset, 90, axis=0)
     arrayStats_Mean = np.nanmean(arrayStats_subset, axis=0)
     arrayStats_Std = np.nanstd(arrayStats_subset, axis=0)
 
 else:
-    arrayStats_minPerc = np.nanpercentile(arrayStats_all, 10, axis=0)
+    arrayStats_minPerc = np.nanpercentile(arrayStats_all, 40, axis=0)
     arrayStats_maxPerc = np.nanpercentile(arrayStats_all, 90, axis=0)
     arrayStats_Mean = np.nanmean(arrayStats_all, axis=0)
     arrayStats_Std = np.nanstd(arrayStats_all, axis=0)
@@ -241,13 +249,19 @@ for lt in range(0,nrLeadTimes):
     leadTimesMin.append(lt*timeSampMin)
 leadTimesMin = np.array(leadTimesMin)
 
-fig = plt.figure(figsize=(13, 13))
+colormap = plt.cm.gist_rainbow # plt.cm.gray
+nrRowsSubplots = 2
+nrColsSubplots = 2
+p = 0
+
+if nrRowsSubplots == nrColsSubplots:
+    fgSize = (13, 13)
+else:
+    fgSize = (20, 13)
+
+fig = plt.figure(figsize=fgSize)    
 ax = fig.add_axes()
 ax = fig.add_subplot(111)
-
-colormap = plt.cm.gist_rainbow # plt.cm.gray
-nrRowsColsSubplots = 2
-p = 0
 
 tic = time.clock()
 for variable in range(0, len(varNames)): ## LOOP OVER VARIABLES
@@ -259,7 +273,7 @@ for variable in range(0, len(varNames)): ## LOOP OVER VARIABLES
     varMax = 0
     varMin = 999
     
-    axSP = plt.subplot(nrRowsColsSubplots, nrRowsColsSubplots, p)
+    axSP = plt.subplot(nrRowsSubplots, nrColsSubplots, p)
     print('Subplot nr: ', p)
     print('++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++')
     for step in range(0, nrSteps): ## LOOP OVER STEPS FOR INITIAL CONDITIONS
@@ -390,37 +404,45 @@ for variable in range(0, len(varNames)): ## LOOP OVER VARIABLES
                     axSP.semilogx(leadTimesMin/60,trajectories[1:20,:,variable].T, color='blue')
                 else:
                     axSP.plot(leadTimesMin/60,trajectories[1:20,:,variable].T, color='blue')
-                
-            # Plot spread of trajectories
-            if pltType == 'spread':
-                # Line colors
-                colors = [colormap(i) for i in np.linspace(0, 1, len(axSP.lines))]
-                for i,j in enumerate(axSP.lines):
-                    j.set_color(colors[i])
-                
-                # Add legend
-                plt.ylim(ylims)
-                if (logTime == True) & (logSpread == True):
-                    plt.xlim([timeSampMin/60, maxLeadTimeMin/60])
-                    axSP.legend(loc='lower right', fontsize=legendFontSize)
-                elif logTime == True:
-                    axSP.legend(loc='upper left', fontsize=legendFontSize)
-                elif logSpread == True:
-                    axSP.legend(loc='lower right', fontsize=legendFontSize)
-                else:
-                    axSP.legend(loc='lower right', fontsize=legendFontSize)
-            
-            # Add labels and title
-            plt.xlabel('Lead time [hours]', fontsize=labelFontSize)
-            
-            if (pltType == 'evolution') & (step == stepEvol):
-                plt.ylabel(varLabels[variable], fontsize=labelFontSize)
-                strTitle = 'Evolution of ' + varLabels[variable] + ' starting at ' + str(fmt2 % minInit) + '-' + str(fmt2 % maxInit)
-                plt.title(strTitle, fontsize=18)
-            if pltType == 'spread':
-                plt.ylabel('Norm. st. deviation', fontsize=labelFontSize)
-                strTitle = 'Spread growth for ' + varLabels[variable]
-                plt.title(strTitle, fontsize=18)
+    
+    if pltType == 'spread':
+        # Line colors
+        colors = [colormap(i) for i in np.linspace(0, 1, len(axSP.lines))]
+        for i,j in enumerate(axSP.lines):
+            j.set_color(colors[i])
+        
+        # Add legend
+        plt.ylim(ylims)
+        if (logTime == True) & (logSpread == True):
+            plt.xlim([timeSampMin/60, maxLeadTimeMin/60])
+            axSP.legend(loc='lower right', fontsize=legendFontSize)
+        elif logTime == True:
+            axSP.legend(loc='upper left', fontsize=legendFontSize)
+        elif logSpread == True:
+            axSP.legend(loc='lower right', fontsize=legendFontSize)
+        else:
+            axSP.legend(loc='lower right', fontsize=legendFontSize)
+    
+    # Plot line of spread saturation
+    plt.axhline(1.0, color='k', linestyle='dashed')
+    
+    # Add labels and title
+    plt.xlabel('Lead time [hours]', fontsize=labelFontSize)
+    
+    if (pltType == 'evolution') & (step == stepEvol):
+        plt.ylabel(varLabels[variable], fontsize=labelFontSize)
+        strTitle = 'Evolution of ' + varLabels[variable] + ' starting at ' + str(fmt2 % minInit) + '-' + str(fmt2 % maxInit)
+        plt.title(strTitle, fontsize=18)
+    if pltType == 'spread':
+        plt.ylabel('Norm. st. deviation', fontsize=labelFontSize)
+        strTitle = 'Spread growth for ' + varLabels[variable]
+        plt.title(strTitle, fontsize=18)
+    
+    plt.grid(True,which="both", axis='x')
+    # axSP.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.1d"))
+    # axSP.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.1d"))
+    axSP.xaxis.set_major_formatter(ticker.FuncFormatter(dt.myLogFormat))
+    axSP.yaxis.set_major_formatter(ticker.FuncFormatter(dt.myLogFormat))
 
 toc = time.clock()
 print('Total elapsed time: ', toc-tic, ' seconds.')

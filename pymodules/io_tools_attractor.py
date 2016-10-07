@@ -203,7 +203,7 @@ def netcdf_list2array(timeStart,timeEnd, inBaseDir, variableNames = [], analysis
 
     return(listStats, variableNames)
     
-def write_netcdf(fileName, headers, dataArray, lowRainThreshold, boolWOLS):
+def write_netcdf(fileName, headers, dataArray, lowRainThreshold, boolWOLS, spectralSlopeLims):
     nrSamples = dataArray.shape[0]
     if boolWOLS == 1:
         strWeightedOLS = "Weighted Ordinary Least Squares"
@@ -214,6 +214,7 @@ def write_netcdf(fileName, headers, dataArray, lowRainThreshold, boolWOLS):
     nc_fid = Dataset(fileName, 'w', format='NETCDF4')
     nc_fid.description = "Statistics computed for radar rainfall >= " + str(lowRainThreshold) + " mm/hr"
     nc_fid.comment = "FFT spectrum fitted by " + strWeightedOLS
+    nc_fid.comment = "Spectral_slope_lims [km] = " + str(spectralSlopeLims)
     nc_fid.source = "MeteoSwiss"
     
     # Create and fill data into variables

@@ -7,4 +7,5 @@ packages/anacon*
 **/*.[oa]
 ### ignore emacs backup files ###
 **/*~
-
+### ignore txt file with the time stamps
+/shscripts/timePeriods.txt

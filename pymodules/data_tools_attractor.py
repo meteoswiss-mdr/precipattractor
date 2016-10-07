@@ -14,11 +14,12 @@ from __future__ import print_function
 import sys
 import math 
 import time 
+import datetime as datetime
 
 import numpy as np
 
 #### Functions to converty reflectivity to rainfall and vice-versa
-def to_dB(array, offset=0.01):
+def to_dB(array, offset=-1):
     '''
     Transform array to dB
     '''
@@ -26,6 +27,7 @@ def to_dB(array, offset=0.01):
     if isList == True:
         array = np.array(array)
     if offset != -1:
+        print('ciaoooo')
         dBarray = 10.0*np.log10(array + offset)
     else:
         dBarray = 10.0*np.log10(array)
@@ -64,16 +66,25 @@ def rainrate2reflectivity(rainrate, A=316.0, b=1.5, zerosDBZ='auto'):
     else:
         minRainRate = 0.012 # 0.0115537519713
     minDBZ = 10.0*np.log10(A*minRainRate**b)
-
-    # Compute reflectivity
-    dBZ = rainrate.copy()
-    dBZ[rainIdx] = 10.0*np.log10(A*rainrate[rainIdx]**b)
     
-    # Replace zero rainrate by the minimum observed reflectivity or set it by hand to a fixed value
-    if zerosDBZ == 'auto':
-        dBZ[zerosIdx] = minDBZ
+    if type(rainrate) == np.ndarray and len(rainrate) > 1:
+        # Compute reflectivity
+        dBZ = rainrate.copy()
+        dBZ[rainIdx] = 10.0*np.log10(A*rainrate[rainIdx]**b)
+        
+        # Replace zero rainrate by the minimum observed reflectivity or set it by hand to a fixed value
+        if zerosDBZ == 'auto':
+            dBZ[zerosIdx] = minDBZ
+        else:
+            dBZ[zerosIdx] = zerosDBZ
     else:
-        dBZ[zerosIdx] = zerosDBZ
+        if rainrate != 0.0:
+            dBZ = 10.0*np.log10(A*rainrate**b)
+        else:
+            if zerosDBZ == 'auto':
+                dBZ = minDBZ
+            else:
+                dBZ = zerosDBZ
     
     return dBZ, minDBZ, minRainRate
     
@@ -165,7 +176,80 @@ def get_colorlist(type):
         clevs= [0,0.08,0.16,0.25,0.40,0.63,1,1.6,2.5,4,6.3,10,16,25,40,63,100,160]
         
     return(color_list, clevs)
-   
+
+def dynamic_formatting_floats(floatArray):
+    if type(floatArray) == list:
+        floatArray = np.array(floatArray)
+        
+    labels = []
+    for label in floatArray:
+        if label >= 0.1 and label < 1:
+            formatting = ',.1f'
+        elif label >= 0.01 and label < 0.1:
+            formatting = ',.2f'
+        elif label >= 0.001 and label < 0.01:
+            formatting = ',.3f'
+        elif label >= 0.0001 and label < 0.001:
+            formatting = ',.4f'
+        elif label >= 1 and label.is_integer():
+            formatting = 'i'
+        else:
+            formatting = ',.1f'
+            
+        if formatting != 'i':
+            labels.append(format(label, formatting))
+        else:
+            labels.append(str(int(label)))
+        
+    return labels
+    
+def update_xlabels(ax):
+    '''
+    Does not work yet
+    '''
+    xlabels = []
+    for label in ax.get_xticks():
+        if label >= 0.1 and label < 1:
+            formatting = ',.1f'
+        elif label >= 0.01 and label < 0.1:
+            formatting = ',.2f'
+        elif label >= 0.001 and label < 0.01:
+            formatting = ',.3f'
+        elif label >= 0.0001 and label < 0.001:
+            formatting = ',.4f'
+        else:
+            formatting = 'i'
+        
+        print(label, formatting)
+        if formatting != 'i':
+            xlabels.append(format(label, formatting))
+        else:
+            xlabels.append(int(label))
+    
+    ax.set_xticklabels(xlabels)
+
+def myDecimalFormat(y,pos):
+    '''
+    Does not work yet
+
+    '''
+    # Find the number of decimal places required
+    if y >= 0.1 and y < 1:
+        decimalplaces = 1
+    elif y >= 0.01 and y < 0.1:
+        decimalplaces = 2
+    elif y >= 0.001 and y < 0.01:
+        decimalplaces = 3
+    elif y >= 0.0001 and y < 0.001:
+        decimalplaces = 4
+    else:
+        decimalplaces = 0
+    
+    # Insert that number into a format string
+    formatstring = '{{:.{:1d}f}}'.format(decimalplaces)
+    # Return the formatted tick label
+    return formatstring.format(y)
+    
 def myLogFormat(y,pos):
     '''
     Function to format the ticks labels of a loglog plot
@@ -270,3 +354,32 @@ def optimal_size_subplot(nrPlots):
         nrCols = int(np.sqrt(nrPlots))+1
     
     return(nrRows, nrCols)
+    
+def fill_attractor_array_nan(arrayStats, timeStamps_datetime, timeSampMin = 5):
+    if len(timeStamps_datetime) == len(arrayStats):
+        nrSamples = len(timeStamps_datetime)
+    else:
+        print("arrayStats, timeStamps_datetime in fill_attractor_array_nan should have the simze number of rows.")
+        sys.exit(1)
+    
+    # Prepare list of NaNs
+    emptyListNaN = np.empty((len(arrayStats[0])-1)) # without the first column
+    emptyListNaN[:] = np.nan
+    emptyListNaN = emptyListNaN.tolist()
+
+    tend = timeStamps_datetime[nrSamples-1]
+    tstart = timeStamps_datetime[0]
+    t = 0
+    while tstart < tend:
+        diffTimeSecs = (timeStamps_datetime[t+1] - timeStamps_datetime[t]).total_seconds()
+        if diffTimeSecs > timeSampMin*60:
+            missingDateTime = timeStamps_datetime[t] + datetime.timedelta(minutes = timeSampMin)
+            # Insert missing date time
+            timeStamps_datetime.insert(t+1, missingDateTime)
+            # Insert line of NaNs in arrayStats (except date)
+            missingDate = int(missingDateTime.strftime("%Y%m%d%H%M%S"))
+            arrayStats.insert(t+1,[missingDate] + emptyListNaN)
+        t = t+1
+        tstart = tstart + datetime.timedelta(minutes = timeSampMin)
+    
+    return(arrayStats, timeStamps_datetime)

@@ -8,7 +8,6 @@ Documentation convention from https://github.com/numpy/numpy/blob/master/doc/HOW
 26.09.2016
 Loris Foresti
 '''
-
 from __future__ import division
 from __future__ import print_function
 
@@ -17,6 +16,8 @@ import time
 import numpy as np
 import math
 import pywt
+
+import matplotlib.pyplot as plt
 
 from scipy import stats
 import scipy.ndimage as ndimage
@@ -176,17 +177,20 @@ def compute_fft_anisotropy(psd2d, fftSizeSub = -1, percentileZero = -1, rotation
     if sigma > 0:
         psd2dsubSmooth = ndimage.gaussian_filter(psd2dsub, sigma=sigma)
     else:
-        psd2dsubSmooth = psd2dsub # just to give a return value...
+        psd2dsubSmooth = psd2dsub.copy() # just to give a return value...
     
     ############### SHIFT ACCORDING TO PERCENTILE
     # Compute conditional percentile on smoothed spectrum/autocorrelation
     minThresholdCondition = 0.01 # Threshold to compute to conditional percentile (only values greater than this)
     if percentileZero > 0:
-        percZero = np.percentile(psd2dsubSmooth[psd2dsubSmooth > minThresholdCondition], percentileZero)
+        percZero = np.nanpercentile(psd2dsubSmooth[psd2dsubSmooth > minThresholdCondition], percentileZero)
     else:
         percZero = np.min(psd2dsubSmooth)
     
-    # Shift spectrum/autocorrelation to start from 0 (zeros will be automatocally neglected in the computation of covariance)
+    if percZero == np.nan:
+        percZero= 0.0
+        
+    # Shift spectrum/autocorrelation to start from 0 (zeros will be automatically neglected in the computation of covariance)
     psd2dsubSmoothShifted = psd2dsubSmooth - percZero
     psd2dsubSmoothShifted[psd2dsubSmoothShifted < 0] = 0.0
     
@@ -480,3 +484,11 @@ def to_zscores(data):
 def from_zscores(data, mean, stdev):
     data = zscores*stdev + mean
     return data
+    
+def nanscatter(data, axis=0, minQ=16, maxQ=84):
+    '''
+    Function to compute the scatter score of Germann (simplified version without weighting).
+    For a Gaussian distribution, the difference from the 84-16 quantiles is equal to +/- one standard deviation
+    '''
+    scatter = np.nanpercentile(data, maxQ, axis=axis) - np.nanpercentile(data, minQ, axis=axis)
+    return scatter

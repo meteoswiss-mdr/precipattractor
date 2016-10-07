@@ -243,7 +243,22 @@ def datetime2absolutetime(timeDate):
     absTime: int
         Number of seconds since 01/01/1970
     '''
-    absTime = int((timeDate-datetime.datetime(1970,1,1)).total_seconds())
     
+    # Convert list or numpy array of values
+    if type(timeDate) == list or type(timeDate) == np.ndarray:
+        absTime = []
+        for t in range(0,len(timeDate)):
+            absTime.append(datetime2absolutetime(timeDate[t]))
+    else:
+        # Convert single value
+        absTime = int((timeDate-datetime.datetime(1970,1,1)).total_seconds())
+    
+    # Convert list to numpy array if necessary
+    if type(timeDate) == np.ndarray:
+        absTime = np.array(absTime)
+        
     return(absTime)
-    
+
+def absolutetime2datetime(absTime):
+    timeDate = datetime.datetime(1970,1,1) + datetime.timedelta(seconds = absTime)
+    return(timeDate)

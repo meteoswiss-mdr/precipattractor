@@ -34,7 +34,7 @@ fmt3 = "%.3f"
 inBaseDir = '/store/msrad/radar/precip_attractor/data/' #'/scratch/lforesti/data/'
 outBaseDir = '/users/lforesti/results/'
 # Whether we used a variable scaling break 
-variableBreak = 0
+plotHistScalingBreak = False
 
 ########GET ARGUMENTS FROM CMD LINE####
 parser = argparse.ArgumentParser(description='Plot radar rainfall field statistics.')
@@ -70,7 +70,12 @@ else:
 
 timeStart = ti.timestring2datetime(timeStartStr)
 timeEnd = ti.timestring2datetime(timeEndStr)
-            
+
+if plotHistScalingBreak:
+    variableBreak = 1
+else:
+    variableBreak = 0
+    
 ############### OPEN FILES WITH STATS
 if args.format == 'csv':
     arrayStats, variableNames = io.csv_list2array(timeStart, timeEnd, inBaseDir, analysisType='STATS', \
@@ -82,6 +87,14 @@ else:
     print('Please provide a valid file format.')
     sys.exit(1)
 
+# Check if there are enough data
+if (len(arrayStats) == 100) & (args.format == 'csv'):
+    print("Not enough data found in CSV files.")
+    sys.exit(1)
+if (len(arrayStats) < 100) & (args.format == 'netcdf'):
+    print("No enough data found in NETCDF files.")
+    sys.exit(1)
+    
 # Generate list of datetime objects
 timeIntList = dt.get_column_list(arrayStats, 0)
 timeStampsDt = ti.timestring_array2datetime_array(timeIntList)
@@ -93,17 +106,10 @@ arrayStats = np.array(arrayStats)
 print(len(arrayStats),' samples found.')
 print('Variables from file: ', variableNames)
 
-if (len(arrayStats) == 100) & (args.format == 'csv'):
-    print("Not enough data found in CSV files.")
-    sys.exit(1)
-if (len(arrayStats) < 100) & (args.format == 'netcdf'):
-    print("No enough data found in NETCDF files.")
-    sys.exit(1)
-
 #################################################################################
 ####################### PLOTTING MULTIPLE ATTRACTORS in combinations of dimensions
-varNamesRows = ['war','r_cmean', 'beta1', 'beta2']
-varNamesCols = ['war','r_cmean', 'beta1', 'beta2']
+varNamesRows = ['war','r_cmean', 'beta1', 'beta2', 'eccentricity']
+varNamesCols = ['war','r_cmean', 'beta1', 'beta2','eccentricity']
 
 #varNamesRows = ['eccentricity']
 #varNamesCols = ['eccentricity', 'war','r_cmean', 'beta1', 'beta2']
@@ -169,7 +175,7 @@ dictIdx = dict(zip(varNamesAll, indicesVars))
 # WAR threshold
 boolWAR = (arrayStats[:,dictIdx['war']] >= warThreshold) 
 # Beta correlation threshold
-boolBetaCorr = (arrayStats[:,dictIdx['beta1']+1] <= -betaCorrThreshold) & (arrayStats[:,dictIdx['beta2']+1] <= -betaCorrThreshold) 
+boolBetaCorr = (arrayStats[:,dictIdx['eccentricity']] < 0.96) & (arrayStats[:,dictIdx['beta1']+1] <= -betaCorrThreshold) & (arrayStats[:,dictIdx['beta2']+1] <= -betaCorrThreshold) 
 #boolEccentricity = arrayStats[:,dictIdx['eccentricity']] < 0.96
 # Combination of thresholds
 boolTot = boolWAR & boolBetaCorr
@@ -179,7 +185,7 @@ nrSamplesBetasWAR = np.sum(boolBetaCorr & boolWAR)
 fractionValidBetas = 100*np.sum(boolBetaCorr & boolWAR)/nrSamplesWAR
 print("Percentage valid betas: ", fmt1 % fractionValidBetas, " %")
 
-############### Select subset of data
+############### Select subset of variables
 varData = []
 for var in range(0, len(varNamesAll)):
     varName = varNamesAll[var]
@@ -231,6 +237,8 @@ medianSectionEnd = np.percentile(varData, maxPercSec, axis=0)
 sectionIntervals = np.vstack((medianSectionStart,medianSectionEnd)).T
 
 ##### Select subset of array within given range
+#print((arrayStats[arrayStats[:,dictIdx['eccentricity']] > 0.96, 0]).astype(int))
+#sys.exit()
 # boolData = (varData[:,2] > 1.45) & (varData[:,2] < 1.55) & (varData[:,3] > 3.0) & (varData[:,3] < 3.1)
 # #varData = varData[boolData,:]
 # timeStampsStr = timeStampsStr[boolTot]
@@ -248,8 +256,6 @@ sectionIntervals = np.vstack((medianSectionStart,medianSectionEnd)).T
         # print(timeStampsSel[i-12])
 ################
 ############## HISTOGRAM SCALING BREAK
-plotHistScalingBreak = False
-
 if plotHistScalingBreak:
     indexScalingVar = dt.get_variable_indices('scaling_break', variableNames)
     scalingBreak = arrayStats[boolTot,indexScalingVar]
@@ -276,7 +282,7 @@ if plotHistScalingBreak:
     plt.text(0.75, 0.91, textMean, transform=axSb.transAxes, fontsize=14)
     plt.text(0.75, 0.87, textStd, transform=axSb.transAxes, fontsize=14)
 
-    maxPerc = 25
+    maxPerc = 30
     plt.ylim([0, maxPerc])
     plt.xlabel('Scaling break [km]')
     plt.ylabel('Frequency [%]')
@@ -290,7 +296,7 @@ if plotHistScalingBreak:
     'Rgt' + str(args.minR) + '_WOLS' + str(args.wols) + '_00005_histScaleBreak_warGt' + str("%0.1f" % warThreshold) + '_' + timeAccumMinStr + '.png'
     print('Saving: ',fileName)
     plt.savefig(fileName, dpi=300)
-#sys.exit()
+    sys.exit()
 
 ########################################
 # Compute duration of event for colour scale
