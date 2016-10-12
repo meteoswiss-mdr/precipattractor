@@ -188,8 +188,13 @@ def compute_fft_anisotropy(psd2d, fftSizeSub = -1, percentileZero = -1, rotation
         percZero = np.min(psd2dsubSmooth)
     
     if percZero == np.nan:
-        percZero= 0.0
-        
+        percZero = 0.0
+    
+    # Treat cases where percentile is not a good choice and take a minimum correlation value (does not work with 2d spectrum)
+    autocorrThreshold = 0.2
+    if (percZero > 0) and (percZero < autocorrThreshold):
+        percZero = autocorrThreshold
+    
     # Shift spectrum/autocorrelation to start from 0 (zeros will be automatically neglected in the computation of covariance)
     psd2dsubSmoothShifted = psd2dsubSmooth - percZero
     psd2dsubSmoothShifted[psd2dsubSmoothShifted < 0] = 0.0
@@ -492,3 +497,18 @@ def nanscatter(data, axis=0, minQ=16, maxQ=84):
     '''
     scatter = np.nanpercentile(data, maxQ, axis=axis) - np.nanpercentile(data, minQ, axis=axis)
     return scatter
+    
+def spherical_model(h, nugget, sill, range):
+    c0 = nugget
+    c1 = sill
+    a = range
+    
+    spherical = np.where(h > a, c0 + c1, c0 + c1*(1.5*(h/a) - 0.5*(h/a)**3))
+    return spherical
+
+def exponential_model(h, nugget, sill, range):
+    c0 = nugget
+    c1 = sill
+    a = range
+    exponential = c0 + c1*(1-np.exp(-3*h/a))
+    return exponential

@@ -505,7 +505,7 @@ while timeLocal <= timeEnd:
                 
                 # Compute anisotropy from autocorrelation function
                 fftSizeSub = 255
-                percentileZero = 75
+                percentileZero = 90
                 autocorrSub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs, percZero,_ = st.compute_fft_anisotropy(autocorr, fftSizeSub, percentileZero, rotation=False)
 
                 # Test to recompute 2d spectrum from autocorr function
@@ -613,7 +613,7 @@ while timeLocal <= timeEnd:
             largeScalesLims = largeScalesLims_best
             
             if variableBreak == 1:
-                print("Best scaling break = ", scalingBreak_best, ' km')
+                print("Best scaling break corr. = ", scalingBreak_best, ' km')
             else:
                 print("Fixed scaling break = ", scalingBreak_best, ' km')
                 
@@ -622,14 +622,15 @@ while timeLocal <= timeEnd:
             model.fit(dt.to_dB(freq[idxBetaBoth]), dt.to_dB(psd1d[idxBetaBoth]))
             mars_fit = model.predict(dt.to_dB(freq[idxBetaBoth]))
             
-            plt.scatter(dt.to_dB(freq),dt.to_dB(psd1d))
-            #plt.scatter(dt.to_dB(freq[idxBetaBoth]), dt.to_dB(psd1d[idxBetaBoth]))
-            plt.plot(dt.to_dB(freq[idxBetaBoth]), mars_fit)
-            plt.show()
+            # plt.scatter(dt.to_dB(freq),dt.to_dB(psd1d))
+            # plt.plot(dt.to_dB(freq[idxBetaBoth]), mars_fit)
+            # plt.show()
             
-            print(model.trace())
-            print(model.summary())
-            print(model.basis_)
+            # print(model.trace())
+            # print(model.summary())
+            # print(model.basis_)
+            # print(model.coef_[0])
+            #y_prime_hat = model.predict_deriv(dt.to_dB(freq[idxBetaBoth]), 'x6')
             scalingBreak_MARS = str(model.basis_[2])[2:7]
             scalingBreak_MARS_KM = 1.0/dt.from_dB(float(scalingBreak_MARS))
             print("Best scaling break MARS = ", scalingBreak_MARS_KM, ' km')
@@ -652,9 +653,16 @@ while timeLocal <= timeEnd:
             
             ################ PLOTTING RAINFIELD AND SPECTRUM #################################
             if boolPlotting:
-                titlesSize = 18
+                titlesSize = 20
+                labelsSize = 18
+                ticksSize = 16
+                unitsSize=14
+                colorbarTicksSize=14
+                mpl.rcParams['xtick.labelsize'] = ticksSize 
+                mpl.rcParams['ytick.labelsize'] = ticksSize 
+                
                 plt.close("all")
-                fig = plt.figure(figsize=(18,7.5))
+                fig = plt.figure(figsize=(16,7.5))
                 
                 ax = fig.add_axes()
                 ax = fig.add_subplot(111)
@@ -671,16 +679,19 @@ while timeLocal <= timeEnd:
                 gis.read_plot_shapefile(fileNameShapefile, proj4stringWGS84, proj4stringCH,  ax = rainAx, linewidth = 0.75)
 
                 # Colorbar
-                cbar = plt.colorbar(rainIm, ticks=clevs, spacing='uniform', norm=norm, extend='max', fraction=0.03)
+                cbar = plt.colorbar(rainIm, ticks=clevs, spacing='uniform', norm=norm, extend='max', fraction=0.04)
+                cbar.ax.tick_params(labelsize=colorbarTicksSize)
                 cbar.set_ticklabels(clevsStr, update_ticks=True)
                 if (timeAccumMin == 1440):
-                    cbar.set_label("mm/day")
+                    cbar.ax.set_title("   mm/day",fontsize=unitsSize)
                 elif (timeAccumMin == 60):
-                    cbar.set_label("mm/hr")    
+                    cbar.ax.set_title("   mm/hr",fontsize=unitsSize)    
                 elif (timeAccumMin == 5):
-                    cbar.set_label("mm/hr")
+                    cbar.ax.set_title(r"   mm hr$^{-1}$",fontsize=unitsSize)
                 else:
                     print('Accum. units not defined.')
+                #cbar.ax.xaxis.set_label_position('top')
+
                 
                 # # Set ticks for dBZ on the other side
                 # ax2 =plt.twinx(ax=cbar.ax)
@@ -690,6 +701,7 @@ while timeLocal <= timeEnd:
                 # ax2.set_yticklabels(dBZlimits)
                 
                 titleStr = timeLocal.strftime("%Y.%m.%d %H:%M") + ', ' + product + ' rainfall field, Q' + str(dataQuality)
+                titleStr = 'Radar rainfall field on ' + timeLocal.strftime("%Y.%m.%d %H:%M")
                 plt.title(titleStr, fontsize=titlesSize)
                 
                 # Draw radar composite mask
@@ -706,8 +718,8 @@ while timeLocal <= timeEnd:
                 yticks = np.arange(0, 500 ,100)
                 plt.xticks(xticks*1000, xticks)
                 plt.yticks(yticks*1000, yticks)
-                plt.xlabel('Swiss easting [km]')
-                plt.ylabel('Swiss northing [km]')
+                plt.xlabel('Swiss Easting [km]', fontsize=labelsSize)
+                plt.ylabel('Swiss Northing [km]', fontsize=labelsSize)
                 
                 #################### PLOT SPECTRUM ###########################################################
                 psAx = plt.subplot(122)
@@ -754,6 +766,7 @@ while timeLocal <= timeEnd:
                     else:
                         clevsPS = np.arange(0,10,0.5)
                         clevsPS = np.arange(0,1.05,0.05)
+                        clevsPSticks = np.arange(0,1.05,0.1)
                     cmapPS = plt.get_cmap('nipy_spectral', clevsPS.shape[0]) #nipy_spectral, gist_ncar
                     normPS = colors.BoundaryNorm(clevsPS, cmapPS.N)
                     cmaplist = [cmapPS(i) for i in range(cmapPS.N)]
@@ -767,7 +780,8 @@ while timeLocal <= timeEnd:
                     ext = (-fftSizeSub, fftSizeSub, -fftSizeSub, fftSizeSub)
                     imPS = psAx.imshow(np.flipud(autocorrSub), cmap = cmapPS, norm=normPS, extent = ext)
                     #cbar = plt.colorbar(imPS, ticks=clevsPS, spacing='uniform', norm=normPS, extend='max', fraction=0.03)
-                    cbar = plt.colorbar(imPS, ticks=clevsPS, spacing='uniform', norm=normPS,fraction=0.03)
+                    cbar = plt.colorbar(imPS, ticks=clevsPSticks, spacing='uniform', norm=normPS,fraction=0.04)
+                    cbar.ax.tick_params(labelsize=colorbarTicksSize)
                     
                     im1 = psAx.contour(autocorrSub, clevsPS, colors='black', alpha = 0.25, extent = ext)
                     im1 = psAx.contour(autocorrSub, [percZero], colors='black', linestyles='dashed', extent = ext)
@@ -778,13 +792,14 @@ while timeLocal <= timeEnd:
                     st.plot_bars(xbar, ybar, eigvals, eigvecs, psAx, 'red')
                     psAx.invert_yaxis()
 
-                    plt.text(0.05, 0.95, 'eccentricity = ' + str(fmt2 % eccentricity), transform=psAx.transAxes, backgroundcolor = 'w')
-                    plt.text(0.05, 0.90, 'orientation = ' + str(fmt2 % orientation) + '$^\circ$', transform=psAx.transAxes,backgroundcolor = 'w')
+                    plt.text(0.05, 0.95, 'eccentricity = ' + str(fmt2 % eccentricity), transform=psAx.transAxes, backgroundcolor = 'w', fontsize=14)
+                    plt.text(0.05, 0.90, 'orientation = ' + str(fmt2 % orientation) + '$^\circ$', transform=psAx.transAxes,backgroundcolor = 'w', fontsize=14)
                     
                     plt.xticks(rotation=90) 
-                    plt.xlabel('Spatial lag [km]')
-                    plt.ylabel('Spatial lag [km]')
+                    plt.xlabel('Spatial lag [km]', fontsize=labelsSize)
+                    plt.ylabel('Spatial lag [km]', fontsize=labelsSize)
                     titleStr = str(timeLocal) + ', 2D autocorrelation function (ifft(spectrum))'
+                    titleStr = '2D autocorrelation function'
                     plt.title(titleStr, fontsize=titlesSize)
                 
                 # Draw 2d power spectrum
@@ -827,8 +842,8 @@ while timeLocal <= timeEnd:
                         # Plot major and minor axis of anisotropy
                         st.plot_bars(xbar, ybar, eigvals, eigvecs, psAx, 'red')
                         
-                        plt.text(0.05, 0.95, 'eccentricity = ' + str(fmt2 % eccentricity), transform=psAx.transAxes, backgroundcolor = 'w')
-                        plt.text(0.05, 0.90, 'orientation = ' + str(fmt2 % orientation) + '$^\circ$', transform=psAx.transAxes,backgroundcolor = 'w')
+                        plt.text(0.05, 0.95, 'eccentricity = ' + str(fmt2 % eccentricity), transform=psAx.transAxes, backgroundcolor = 'w', fontsize=14)
+                        plt.text(0.05, 0.90, 'orientation = ' + str(fmt2 % orientation) + '$^\circ$', transform=psAx.transAxes,backgroundcolor = 'w', fontsize=14)
                         
                         # Create ticks in km
                         ticks_loc = np.arange(0,2*fftSizeSub,1)
@@ -956,7 +971,7 @@ while timeLocal <= timeEnd:
                 
                 with warnings.catch_warnings():  
                     warnings.simplefilter("ignore") 
-                    plt.savefig(stringFigName)
+                    plt.savefig(stringFigName,dpi=300)
                 print(stringFigName, ' saved.')
                 
                 # Copy plot to /store
