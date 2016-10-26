@@ -512,3 +512,42 @@ def exponential_model(h, nugget, sill, range):
     a = range
     exponential = c0 + c1*(1-np.exp(-3*h/a))
     return exponential
+    
+def box_cox_transform(datain,Lambda):
+    dataout = datain.copy()
+    if Lambda==0:
+        dataout = np.log(dataout)
+    else:
+        dataout = (dataout**Lambda - 1)/Lambda
+    return dataout
+    
+def box_cox_transform_test_lambdas(datain,lambdas=[]):
+    if len(lambdas)==0:
+        lambdas = np.linspace(-1,1,11)
+    data = []
+    labels=[]
+    sk=[]
+    for l in lambdas:
+        data_transf = box_cox_transform(datain,l)
+        data_transf = (data_transf - np.mean(data_transf))/np.std(data_transf)
+        data.append(data_transf)
+        labels.append('{0:.1f}'.format(l))
+        sk.append(stats.skew(data_transf)) # skewness
+    
+    bp = plt.boxplot(data,labels=labels)
+    
+    ylims = np.percentile(data,0.99)
+    plt.title('Box-Cox transform')
+    plt.xlabel('Lambdas')
+    
+    ymax = np.zeros(len(data))
+    for i in range(len(data)):
+        y = sk[i]
+        x = i+1
+        plt.plot(x, y,'ok',ms=5, markeredgecolor ='k')
+        fliers = bp['fliers'][i].get_ydata()
+        if len(fliers>0):
+            ymax[i] = np.max(fliers)
+    ylims = np.percentile(ymax,60)
+    plt.ylim((-1*ylims,ylims))
+    plt.show()
