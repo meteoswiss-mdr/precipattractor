@@ -390,7 +390,7 @@ def plot_bars(x_bar, y_bar, eigvals, eigvecs, ax, colour='white'):
     mean = np.array([x_bar, y_bar])
     ax.plot(*_make_lines(eigvals, eigvecs, mean, 0), marker='o', color=colour)
     ax.plot(*_make_lines(eigvals, eigvecs, mean, -1), marker='o', color=colour)
-    ax.axis('image')
+    #ax.axis('image') # may give a weird displacement of axes...
 ########################
 
 def update_mean(data, newSample):
