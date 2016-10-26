@@ -496,7 +496,9 @@ while timeLocal <= timeEnd:
                     
                     ##### Generate stochastic field with given spectrum
                     # Generate a field of white noise
-                    #np.random.seed(5)
+                    plt.close('all')
+                    np.random.seed(5)
+                    #fftDomainSize=5000
                     randValues = np.random.randn(fftDomainSize,fftDomainSize)
                     #randValues = np.random.rand(fftDomainSize,fftDomainSize)
                     #randValues[rainMask != 0] = 0.0
@@ -504,22 +506,76 @@ while timeLocal <= timeEnd:
                     # plt.imshow(randValues)
                     # plt.colorbar()
                     # plt.show()
+                    randValues_fft = np.fft.fft2(randValues)
                     
-                    # randValues = np.fft.fft2(randValues)
-                    
-                    #noiseSpectrum = np.abs(np.fft.fftshift(randValues))**2/fftDomainSize**2
+                    noiseSpectrum = np.abs(np.fft.fftshift(randValues_fft))**2/fftDomainSize**2
+                    noisePhase = np.angle(randValues_fft)
+                    # plt.imshow(noiseSpectrum)#,vmin=0,vmax=12)
+                    # plt.colorbar()
+                    # plt.show()
+                    # plt.imshow(noisePhase)#,vmin=0,vmax=12)
+                    # plt.colorbar()
+                    # plt.show()
                     
                     # plt.imshow(dt.to_dB(noiseSpectrum))
                     # plt.colorbar()
                     # plt.show()
-                    # Multiply the FFT of the precip field with the the field of white noise
-                    fcorrNoise = randValues*fprecipNoShift
                     
+                    # Multiply the FFT of the precip field with the FFT of white noise
+                    fcorrNoise_fft = randValues_fft*fprecipNoShift
+                    # Do the inverse FFT
+                    corrNoise_fft = np.fft.ifft2(fcorrNoise_fft)
+                    # Get the real part
+                    corrNoiseReal_fft = np.array(corrNoise_fft.real)
+                    corrNoiseReal_fft,_,_ = st.to_zscores(corrNoiseReal_fft)
+                    
+                    corrNoiseField_fft = np.fft.fft2(corrNoiseReal_fft)
+                    corrNoiseField_fft_spectrum = np.fft.fftshift(np.abs(corrNoiseField_fft)**2/fftDomainSize**2)
+                    
+                    # Multiply the FFT of the precip field with white noise
+                    fcorrNoise = randValues*fprecipNoShift
                     # Do the inverse FFT
                     corrNoise = np.fft.ifft2(fcorrNoise)
                     # Get the real part
                     corrNoiseReal = np.array(corrNoise.real)
                     corrNoiseReal,_,_ = st.to_zscores(corrNoiseReal)
+                    
+                    corrNoiseField = np.fft.fft2(corrNoiseReal)
+                    corrNoiseField_spectrum = np.fft.fftshift(np.abs(corrNoiseField)**2/fftDomainSize**2)
+                    
+                    plt.subplot(221)
+                    plt.imshow(corrNoiseReal_fft)
+                    plt.colorbar()
+                    plt.title('FFT of rain x FFT noise')
+                    plt.subplot(222)
+                    plt.imshow(corrNoiseReal)
+                    plt.colorbar()
+                    plt.title('FFT of rain x white noise')
+                    plt.subplot(223)
+                    plt.imshow(dt.to_dB(corrNoiseField_fft_spectrum),vmin=-50,vmax=45)
+                    plt.colorbar()
+                    plt.title('FFT spectrum of rain x FFT white noise')
+                    plt.subplot(224)
+                    plt.imshow(dt.to_dB(corrNoiseField_spectrum),vmin=-50,vmax=45)
+                    plt.colorbar()
+                    plt.title('FFT spectrum of rain x white noise')
+                    plt.show()
+                    
+                    # differences of spectra
+                    plt.subplot(221)
+                    plt.imshow(dt.to_dB(psd2d) - dt.to_dB(corrNoiseField_fft_spectrum), vmin=40, vmax=200)
+                    plt.colorbar()
+                    plt.title('Diff rain and noise field spectrum (FFT(R)*FFT(noise))')
+                    plt.subplot(222)
+                    plt.imshow(dt.to_dB(psd2d) - dt.to_dB(corrNoiseField_spectrum), vmin=40, vmax=200)
+                    plt.colorbar()
+                    plt.title('Diff rain and noise field spectrum (FFT(R)*noise)')
+                    plt.subplot(223)
+                    plt.imshow(dt.to_dB(corrNoiseField_fft_spectrum) - dt.to_dB(corrNoiseField_spectrum))
+                    plt.colorbar()
+                    plt.title('Diff noise field spectrum (FFT(R)*FFT(noise)) \n and noise field spectrum (FFT(R)*noise)')
+                    plt.show()
+                    sys.exit()
                     
                     #### PLOT STOCHASTIC FIELDS
 

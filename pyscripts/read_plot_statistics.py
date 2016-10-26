@@ -6,6 +6,7 @@ import argparse
 import numpy as np
 import pandas as pd
 import sys
+import os
 
 import matplotlib as mpl
 #mpl.use('Agg')
@@ -33,6 +34,7 @@ fmt3 = "%.3f"
 ################# DEFAULT ARGS #########################
 inBaseDir = '/store/msrad/radar/precip_attractor/data/' #'/scratch/lforesti/data/'
 outBaseDir = '/users/lforesti/results/'
+tmpBaseDir = '/scratch/lforesti/tmp/'
 # Whether we used a variable scaling break 
 plotHistScalingBreak = False
 
@@ -48,8 +50,12 @@ parser.add_argument('-minCorrBeta', default=0.95, type=float,help='Minimum corre
 parser.add_argument('-accum', default=5, type=int,help='Accumulation time of the product [minutes].')
 parser.add_argument('-temp', default=5, type=int,help='Temporal sampling of the products [minutes].')
 parser.add_argument('-format', default='netcdf', type=str,help='Format of the file containing the statistics [csv,netcdf].')
+parser.add_argument('-refresh', default=0, type=int,help='Whether to refresh the binary .npy archive or not.')
+
 args = parser.parse_args()
 
+refreshArchive = bool(args.refresh)
+print('Refresh archive:', refreshArchive)
 product = args.product
 timeAccumMin = args.accum
 timeSampMin = args.temp
@@ -77,23 +83,39 @@ else:
     variableBreak = 0
     
 ############### OPEN FILES WITH STATS
-if args.format == 'csv':
-    arrayStats, variableNames = io.csv_list2array(timeStart, timeEnd, inBaseDir, analysisType='STATS', \
-    product = product, timeAccumMin = timeSampMin, minR=args.minR, wols=args.wols, variableBreak=variableBreak)
-elif args.format == 'netcdf':
-    arrayStats, variableNames = io.netcdf_list2array(timeStart, timeEnd, inBaseDir, analysisType='STATS', \
-    product = product, timeAccumMin = timeAccumMin, minR=args.minR, wols=args.wols, variableBreak=variableBreak)
+## Open single binary python file with stats to speed up (if it exists)
+tmpArchiveFileName = tmpBaseDir + timeStartStr + '-' + timeEndStr + '_temporaryAttractor.npy'
+tmpArchiveFileNameVariables = tmpBaseDir + timeStartStr + '-' + timeEndStr + '_temporaryAttractor_varNames.npy'
+if (os.path.isfile(tmpArchiveFileName) == True) and (refreshArchive == False):
+    arrayStats = np.load(tmpArchiveFileName)
+    arrayStats = arrayStats.tolist()
+    variableNames = np.load(tmpArchiveFileNameVariables)
+    print('Loaded:', tmpArchiveFileName)
 else:
-    print('Please provide a valid file format.')
-    sys.exit(1)
+    if args.format == 'csv':
+        arrayStats, variableNames = io.csv_list2array(timeStart, timeEnd, inBaseDir, analysisType='STATS', \
+        product = product, timeAccumMin = timeSampMin, minR=args.minR, wols=args.wols, variableBreak=variableBreak)
+    elif args.format == 'netcdf':
+        arrayStats, variableNames = io.netcdf_list2array(timeStart, timeEnd, inBaseDir, analysisType='STATS', \
+        product = product, timeAccumMin = timeAccumMin, minR=args.minR, wols=args.wols, variableBreak=variableBreak)
+    else:
+        print('Please provide a valid file format.')
+        sys.exit(1)
 
-# Check if there are enough data
-if (len(arrayStats) == 100) & (args.format == 'csv'):
-    print("Not enough data found in CSV files.")
-    sys.exit(1)
-if (len(arrayStats) < 100) & (args.format == 'netcdf'):
-    print("No enough data found in NETCDF files.")
-    sys.exit(1)
+    # Check if there are enough data
+    if (len(arrayStats) == 100) & (args.format == 'csv'):
+        print("Not enough data found in CSV files.")
+        sys.exit(1)
+    if (len(arrayStats) < 100) & (args.format == 'netcdf'):
+        print("No enough data found in NETCDF files.")
+        sys.exit(1)
+
+## Save data into a single binary bython file to speed up further analysis with same dataset
+arrayData = []
+if refreshArchive == True:
+    np.save(tmpArchiveFileName, arrayStats)
+    np.save(tmpArchiveFileNameVariables, variableNames)
+    print('Saved:',tmpArchiveFileName)
     
 # Generate list of datetime objects
 timeIntList = dt.get_column_list(arrayStats, 0)
@@ -108,8 +130,8 @@ print('Variables from file: ', variableNames)
 
 #################################################################################
 ####################### PLOTTING MULTIPLE ATTRACTORS in combinations of dimensions
-varNamesRows = ['war','r_cmean', 'beta1', 'beta2', 'eccentricity']
-varNamesCols = ['war','r_cmean', 'beta1', 'beta2','eccentricity']
+varNamesRows = ['eccentricity'] #['war','r_cmean', 'beta1', 'beta2', 'eccentricity']
+varNamesCols = ['eccentricity', 'war','r_cmean', 'beta1', 'beta2']
 
 #varNamesRows = ['eccentricity']
 #varNamesCols = ['eccentricity', 'war','r_cmean', 'beta1', 'beta2']
@@ -125,7 +147,7 @@ boolPowPlotEccentricity = False
 if boolLogPlot:
     WARlims = [6,18] # [6,18]
     IMFlims = [-25,10] # [-20,5]
-    MMlims = [-6,10] # [-20,5]    
+    MMlims = [-8,10] # [-20,5]    
 else:
     WARlims = [warThreshold,60]
     IMFlims = [0.03, 3.0]
@@ -136,9 +158,8 @@ if boolPowPlotEccentricity:
 else:
     ecclims = [0,1]
 
-beta1lims = [1.6,3] #[1.6,2.8]
-beta2lims = [2.0,4] #[3.2,4]
-
+beta1lims = [1.2,2.8] #[1.6,2.8]
+beta2lims = [2.2,4.3] #[3.2,4]
 
 trajectoryPlot = 'sections' # 'lines' 'scatter' 'coloredlines' 'sections'
 densityPlot = '2dhist'# 'kde' or '2dhist'
@@ -175,10 +196,9 @@ dictIdx = dict(zip(varNamesAll, indicesVars))
 # WAR threshold
 boolWAR = (arrayStats[:,dictIdx['war']] >= warThreshold) 
 # Beta correlation threshold
-boolBetaCorr = (arrayStats[:,dictIdx['eccentricity']] < 0.96) & (arrayStats[:,dictIdx['beta1']+1] <= -betaCorrThreshold) & (arrayStats[:,dictIdx['beta2']+1] <= -betaCorrThreshold) 
-#boolEccentricity = arrayStats[:,dictIdx['eccentricity']] < 0.96
+boolBetaCorr = (np.abs(arrayStats[:,dictIdx['beta1']+1]) >= np.abs(betaCorrThreshold)) & (np.abs(arrayStats[:,dictIdx['beta2']+1]) >= np.abs(betaCorrThreshold))
 # Combination of thresholds
-boolTot = boolWAR & boolBetaCorr
+boolTot = np.logical_and(boolWAR == True, boolBetaCorr == True)
 
 nrSamplesWAR = np.sum(boolWAR)
 nrSamplesBetasWAR = np.sum(boolBetaCorr & boolWAR)

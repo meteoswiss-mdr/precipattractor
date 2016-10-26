@@ -48,11 +48,10 @@ np.set_printoptions(precision=4)
 ################# DEFAULT ARGS #########################
 inBaseDir = '/scratch/lforesti/data/' # '/store/msrad/radar/precip_attractor/data/' #'/scratch/lforesti/data/'
 outBaseDir = '/users/lforesti/results/'
-tmpBaseDir = '/users/lforesti/tmp/'
+tmpBaseDir = '/scratch/lforesti/tmp/'
 pltType = 'spread' #'evolution' 'spread'
 timeSampMin = 5
 spreadMeasure = 'scatter'#'std' or 'scatter'
-refreshArchive = False
 
 ########GET ARGUMENTS FROM CMD LINE####
 parser = argparse.ArgumentParser(description='Plot radar rainfall field statistics.')
@@ -67,9 +66,12 @@ parser.add_argument('-accum', default=5, type=int,help='Accumulation time of the
 parser.add_argument('-temp', default=5, type=int,help='Temporal sampling of the products [minutes].')
 parser.add_argument('-format', default='netcdf', type=str,help='Format of the file containing the statistics [csv,netcdf].')
 parser.add_argument('-plt', default='spread', type=str,help='Plot type [spread, evolution].')
+parser.add_argument('-refresh', default=0, type=int,help='Whether to refresh the binary .npy archive or not.')
 
 args = parser.parse_args()
 
+refreshArchive = bool(args.refresh)
+print('Refresh archive:', refreshArchive)
 product = args.product
 pltType = args.plt
 timeAccumMin = args.accum
@@ -229,7 +231,7 @@ boolWAR = (arrayStats[:,dictIdx['war']] >= warThreshold)
 # Beta correlation threshold
 boolBetaCorr = (np.abs(arrayStats[:,dictIdx['beta1']+1]) >= np.abs(betaCorrThreshold)) & (np.abs(arrayStats[:,dictIdx['beta2']+1]) >= np.abs(betaCorrThreshold))
 # Combination of thresholds
-boolTot = np.logical_and(boolWAR == False, boolBetaCorr == False)
+boolTot = np.logical_and(boolWAR == True, boolBetaCorr == True)
 
 ############### Select subset of variables and change sign of beta
 arrayStats_attractor = []
@@ -282,7 +284,7 @@ if verbosity >= 1:
 
 ##########PLOT INCREMENTS
 # Plot time series of increments
-plotIncrements = False
+plotIncrements = True
 if plotIncrements:
     nrRowsSubplots = 2
     nrColsSubplots = 3
@@ -507,7 +509,7 @@ for variable in range(0, len(varNames)): ## LOOP OVER VARIABLES
         # Append trajectory to the list of trajectories
         trajectories = np.array(trajectories)
         
-        print(len(trajectories), ' valid trajetories in ', varLabels[variable], ' range ', minInit,'-',maxInit)
+        print(len(trajectories), ' valid trajectories in ', varLabels[variable], ' range ', minInit,'-',maxInit)
         if len(trajectories) > minNrTraj:
             #print(trajectories.shape[0], ' x ', trajectories.shape[1], ' x ', trajectories.shape[2], '($N_{analogue}$) x ($N_{leadtimes}$) x ($N_{dim}$)')
 
@@ -721,6 +723,9 @@ for variable in range(0, len(varNames)): ## LOOP OVER VARIABLES
                 strTitleLine2 = 'Time series starting in range ' + str(fmt2 % minInitLab) + '-' + str(fmt2 % maxInitLab) + ' (N = ' + str(trajectories.shape[0]) + ')'
                 plt.title(strTitleLine1 + '\n' + strTitleLine2, fontsize=22)
                 plt.show()
+                # fileName = outBaseDir + product + '_' + pltType + '_' + timeStartStr + '-' + timeEndStr +  '0_' + 'Rgt' + str(args.minR) + '_WOLS' + str(args.wols) + '_00005_warGt' + str("%0.1f" % warThreshold) + '_logIMFWAR' + str(int(logIMFWAR)) + '_' + timeAccumMinStr + '.png'
+                # print('Saving: ',fileName)
+                # plt.savefig(fileName, dpi=300)
                 #sys.exit()
             
             ################## PLOTTING ################################################################################

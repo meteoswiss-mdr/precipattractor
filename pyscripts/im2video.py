@@ -7,14 +7,14 @@ from moviepy.editor import *
 import glob
 import datetime
 import fnmatch
+import numpy as np
+import os
 
 import time_tools_attractor as ti
 import io_tools_attractor as io
 
 #######################
-product = 'CPC'
 inBaseDir = '/scratch/lforesti/data/' # directory to read from
-plotSpectrum = '1d'
 outBaseDir = '/users/lforesti/results/'
 framesPerSecond = 3
 timeAccumMin = 5
@@ -26,6 +26,7 @@ parser.add_argument('-end', default='201601310000', type=str,help='Starting date
 parser.add_argument('-product', default='AQC', type=str,help='Which radar rainfall product to use (AQC, CPC, etc).')
 parser.add_argument('-spec', default='1d', type=str,help='Spectrum type (1d, 2d or autocorr).')
 parser.add_argument('-format', default='mp4', type=str,help='Video format (mp4 or avi).')
+parser.add_argument('-resize', default=100, type=int, help='Resize percentage (only for gif).')
 
 args = parser.parse_args()
 
@@ -47,7 +48,7 @@ else:
 timeStart = ti.timestring2datetime(timeStartStr)
 timeEnd = ti.timestring2datetime(timeEndStr)
 
-fileNameExpr = product + '_' + plotSpectrum + 'PS*'
+fileNameExpr = product + '_' + plotSpectrum + 'PS_*'
 fileList = io.get_files_period(timeStart, timeEnd, inBaseDir, fileNameExpr, tempResMin = 5)
 
 # Check if there are file found
@@ -59,9 +60,20 @@ if len(fileList) == 0:
 
 print("Nr. files: ", len(fileList))
 print('Files found for video: ', *fileList, sep='\n')
-
-clip = ImageSequenceClip(fileList, fps=framesPerSecond)
-
-# Write out clip
 outputFileName = outBaseDir + product + timeStartStr + '-' + timeEndStr + '_movieDBZ_' + plotSpectrum + 'PS' + extension
-clip.write_videofile(outputFileName)
+
+if args.format == 'gif':
+    cmd = 'convert -verbose -resize ' + str(args.resize) + '% -delay ' + str(100/framesPerSecond) + ' -loop 0 ' + ' '.join(fileList) + ' '+ outputFileName
+    print(cmd)
+    os.system(cmd)
+elif args.format == 'avi':
+    clip = ImageSequenceClip(fileList, fps=framesPerSecond)
+    # Write out clip
+    clip.write_videofile(outputFileName, codec='png')
+elif args.format == 'mp4':
+    clip = ImageSequenceClip(fileList, fps=framesPerSecond)
+    # Write out clip
+    clip.write_videofile(outputFileName, codec='libx264')
+else:
+    print('Format should be gif, avi or mp4')
+    sys.exit(1)

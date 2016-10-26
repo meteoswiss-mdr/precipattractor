@@ -8,7 +8,7 @@ import argparse
 from PIL import Image
 
 import matplotlib as mpl
-#mpl.use('Agg')
+mpl.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -46,6 +46,7 @@ noData = -999.0
 fmt1 = "%.1f"
 fmt2 = "%.2f"
 fmt3 = "%.3f"
+fmt4 = "%.4f"
 fmt5 = "%.5f"
 
 ########SET DEFAULT ARGUMENTS##########
@@ -54,7 +55,7 @@ resKm = 1 # To compute FFT frequency
 inBaseDir = '/scratch/' + usrName + '/data/' # directory to read from
 outBaseDir = '/store/msrad/radar/precip_attractor/data/'
 fourierVar = 'dbz' # field on which to perform the fourier analysis ('rainrate' or 'dbz')
-scalingBreakArray_KM = np.arange(6, 42, 2) # [15]
+scalingBreakArray_KM = [12] #np.arange(6, 42, 2) # [15]
 maxBeta1rangeKM = 512
 minBeta2rangeKM = 4
 fftDomainSize = 512
@@ -123,9 +124,9 @@ else:
     sys.exit(1)
     
 if fourierVar == 'rainrate':
-        unitsSpectrum = r"Rainfall field power $\left[ 10\mathrm{log}_{10}\left(\frac{(mm/hr)^2}{km}\right)\right]$"
+        unitsSpectrum = r"Rainfall field power $\left[ 10\mathrm{log}_{10}\left(\frac{(mm/hr)^2}{km^2}\right)\right]$"
 elif fourierVar == 'dbz':
-        unitsSpectrum = r"Reflectivity field power $\left[ 10\mathrm{log}_{10}\left(\frac{dBZ^2}{km}\right)\right]$"
+        unitsSpectrum = r"Reflectivity field power $\left[ 10\mathrm{log}_{10}\left(\frac{dBZ^2}{km^2}\right)\right]$"
                         
 ###################################
 # Get dattime from timestamp
@@ -499,14 +500,14 @@ while timeLocal <= timeEnd:
             psd2dNoShift = np.abs(fprecipNoShift)**2/(fftDomainSize*fftDomainSize)
             
             # Compute autocorrelation using inverse FFT of spectrum
-            if plotSpectrum == 'autocorr' or plotSpectrum == '1d':
+            if (plotSpectrum == 'autocorr') or (plotSpectrum == '1d') or (plotSpectrum == '2d+autocorr'):
                 # Compute autocorrelation
                 autocorr,_ = st.compute_autocorrelation_fft(rainfieldZeros*window, FFTmod = 'NUMPY')
                 
                 # Compute anisotropy from autocorrelation function
-                fftSizeSub = 255
+                autocorrSizeSub = 255
                 percentileZero = 90
-                autocorrSub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs, percZero,_ = st.compute_fft_anisotropy(autocorr, fftSizeSub, percentileZero, rotation=False)
+                autocorrSub, eccentricity_autocorr, orientation_autocorr, xbar_autocorr, ybar_autocorr, eigvals_autocorr, eigvecs_autocorr, percZero_autocorr,_ = st.compute_fft_anisotropy(autocorr, autocorrSizeSub, percentileZero, rotation=False)
 
                 # Test to recompute 2d spectrum from autocorr function
                 # autocorrNoShift = np.fft.fft2(autocorrSub)
@@ -518,9 +519,9 @@ while timeLocal <= timeEnd:
                 # plt.imshow(10.0*np.log10(psd2d))
                 # plt.show()
                 # sys.exit()
-            if plotSpectrum == '2d':
-                # Extract central region of 2d power spectrum and compute covariance
+            if (plotSpectrum == '2d') or (plotSpectrum == '2d+autocorr'):
                 cov2logPS = True # Whether to compute the anisotropy on the log of the 2d PS
+                # Extract central region of 2d power spectrum and compute covariance
                 if cov2logPS:
                     psd2d_anis = 10.0*np.log10(psd2d)
                 else:
@@ -530,9 +531,9 @@ while timeLocal <= timeEnd:
                 fftSizeSub = 40#255
                 percentileZero = 90
                 smoothing_sigma = 3
-                psd2dsub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs, percZero, psd2dsubSmooth = st.compute_fft_anisotropy(psd2d_anis, fftSizeSub, percentileZero, sigma = smoothing_sigma)
+                psd2dsub, eccentricity_ps, orientation_ps, xbar_ps, ybar_ps, eigvals_ps, eigvecs_ps, percZero_ps, psd2dsubSmooth = st.compute_fft_anisotropy(psd2d_anis, fftSizeSub, percentileZero, sigma = smoothing_sigma)
             
-                print(percentileZero,'- percentile = ', percZero)
+                print(percentileZero,'- percentile = ', percZero_ps)
             # Compute 1D radially averaged power spectrum
             bin_size = 1
             nr_pixels, bin_centers, psd1d = radialprofile.azimuthalAverage(psd2d, binsize=bin_size, return_nr=True)
@@ -618,22 +619,24 @@ while timeLocal <= timeEnd:
                 print("Fixed scaling break = ", scalingBreak_best, ' km')
                 
             #### Fitting spectral slopes with MARS (Multivariate Adaptive Regression Splines)
-            model = Earth(max_degree = 1, max_terms = 2)
-            model.fit(dt.to_dB(freq[idxBetaBoth]), dt.to_dB(psd1d[idxBetaBoth]))
-            mars_fit = model.predict(dt.to_dB(freq[idxBetaBoth]))
-            
-            # plt.scatter(dt.to_dB(freq),dt.to_dB(psd1d))
-            # plt.plot(dt.to_dB(freq[idxBetaBoth]), mars_fit)
-            # plt.show()
-            
-            # print(model.trace())
-            # print(model.summary())
-            # print(model.basis_)
-            # print(model.coef_[0])
-            #y_prime_hat = model.predict_deriv(dt.to_dB(freq[idxBetaBoth]), 'x6')
-            scalingBreak_MARS = str(model.basis_[2])[2:7]
-            scalingBreak_MARS_KM = 1.0/dt.from_dB(float(scalingBreak_MARS))
-            print("Best scaling break MARS = ", scalingBreak_MARS_KM, ' km')
+            useMARS = False
+            if useMARS:
+                model = Earth(max_degree = 1, max_terms = 2)
+                model.fit(dt.to_dB(freq[idxBetaBoth]), dt.to_dB(psd1d[idxBetaBoth]))
+                mars_fit = model.predict(dt.to_dB(freq[idxBetaBoth]))
+                
+                # plt.scatter(dt.to_dB(freq),dt.to_dB(psd1d))
+                # plt.plot(dt.to_dB(freq[idxBetaBoth]), mars_fit)
+                # plt.show()
+                
+                # print(model.trace())
+                # print(model.summary())
+                # print(model.basis_)
+                # print(model.coef_[0])
+                #y_prime_hat = model.predict_deriv(dt.to_dB(freq[idxBetaBoth]), 'x6')
+                scalingBreak_MARS = str(model.basis_[2])[2:7]
+                scalingBreak_MARS_KM = 1.0/dt.from_dB(float(scalingBreak_MARS))
+                print("Best scaling break MARS = ", scalingBreak_MARS_KM, ' km')
             
             tocFFT = time.clock()
             #print('FFT time: ', tocFFT-ticFFT, ' seconds.')
@@ -662,12 +665,18 @@ while timeLocal <= timeEnd:
                 mpl.rcParams['ytick.labelsize'] = ticksSize 
                 
                 plt.close("all")
-                fig = plt.figure(figsize=(16,7.5))
+                if plotSpectrum == '2d+autocorr':
+                    fig = plt.figure(figsize=(8.3,20))
+                else:
+                    fig = plt.figure(figsize=(16,7.5))
                 
                 ax = fig.add_axes()
                 ax = fig.add_subplot(111)
                 
-                rainAx = plt.subplot(121)
+                if plotSpectrum == '2d+autocorr':
+                    rainAx = plt.subplot(311)
+                else:
+                    rainAx = plt.subplot(121)
                 
                 # Draw DEM
                 rainAx.imshow(demImg, extent = (Xmin, Xmax, Ymin, Ymax), vmin=100, vmax=3000, cmap = plt.get_cmap('gray'))
@@ -687,7 +696,10 @@ while timeLocal <= timeEnd:
                 elif (timeAccumMin == 60):
                     cbar.ax.set_title("   mm/hr",fontsize=unitsSize)    
                 elif (timeAccumMin == 5):
-                    cbar.ax.set_title(r"   mm hr$^{-1}$",fontsize=unitsSize)
+                    if plotSpectrum == '2d+autocorr':
+                        cbar.set_label(r"mm hr$^{-1}$",fontsize=unitsSize)
+                    else:
+                        cbar.ax.set_title(r"   mm hr$^{-1}$",fontsize=unitsSize)
                 else:
                     print('Accum. units not defined.')
                 #cbar.ax.xaxis.set_label_position('top')
@@ -707,9 +719,6 @@ while timeLocal <= timeEnd:
                 # Draw radar composite mask
                 rainAx.imshow(mask, cmap=cmapMask, extent = (Xmin, Xmax, Ymin, Ymax), alpha = 0.5)
                 
-                # Decompose covariance matrix and plot major and minor axis of anisotropy
-                #eigvals, eigvecs = st.plot_bars(xbar, ybar, cov, rainAx)
-                
                 # Add product quality within image
                 dataQualityTxt = "Quality = " + str(dataQuality)
                 
@@ -722,10 +731,10 @@ while timeLocal <= timeEnd:
                 plt.ylabel('Swiss Northing [km]', fontsize=labelsSize)
                 
                 #################### PLOT SPECTRUM ###########################################################
-                psAx = plt.subplot(122)
 
                 ### Test to generate power law noise using the observed power spectrum
                 if (plotSpectrum == '1dnoise') | (plotSpectrum == '2dnoise') | (plotSpectrum == 'noisefield'):
+                    psAx = plt.subplot(122)
                     # Generate a filed of white noise
                     randValues = np.random.randn(fftDomainSize,fftDomainSize)
                     # Compute the FFT of the white noise
@@ -756,69 +765,28 @@ while timeLocal <= timeEnd:
                     titleStr = str(timeLocal) + ', Power law noise'
                     cbar = plt.colorbar(noiseIm, spacing='uniform', norm=norm, extend='max', fraction=0.03)
                 
-                # Draw autocorrelation function
-                if (plotSpectrum == 'autocorr'):
-                    maxAutocov = np.max(autocorrSub)
-                    if maxAutocov > 50:
-                        clevsPS = np.arange(0,200,10)
-                    elif maxAutocov > 10:
-                        clevsPS = np.arange(0,50,5)
-                    else:
-                        clevsPS = np.arange(0,10,0.5)
-                        clevsPS = np.arange(0,1.05,0.05)
-                        clevsPSticks = np.arange(0,1.05,0.1)
-                    cmapPS = plt.get_cmap('nipy_spectral', clevsPS.shape[0]) #nipy_spectral, gist_ncar
-                    normPS = colors.BoundaryNorm(clevsPS, cmapPS.N)
-                    cmaplist = [cmapPS(i) for i in range(cmapPS.N)]
-                    # force the first color entry to be white
-                    cmaplist[0] = (1,1,1,1.0)
-                    # Create the new map
-                    cmapPS = cmapPS.from_list('Custom cmap', cmaplist, cmapPS.N)
-
-                    #cmapPS.set_over('white',1)
-                    
-                    ext = (-fftSizeSub, fftSizeSub, -fftSizeSub, fftSizeSub)
-                    imPS = psAx.imshow(np.flipud(autocorrSub), cmap = cmapPS, norm=normPS, extent = ext)
-                    #cbar = plt.colorbar(imPS, ticks=clevsPS, spacing='uniform', norm=normPS, extend='max', fraction=0.03)
-                    cbar = plt.colorbar(imPS, ticks=clevsPSticks, spacing='uniform', norm=normPS,fraction=0.04)
-                    cbar.ax.tick_params(labelsize=colorbarTicksSize)
-                    
-                    im1 = psAx.contour(autocorrSub, clevsPS, colors='black', alpha = 0.25, extent = ext)
-                    im1 = psAx.contour(autocorrSub, [percZero], colors='black', linestyles='dashed', extent = ext)
-                    
-                    # Plot major and minor axis of anisotropy
-                    xbar = xbar - fftSizeSub
-                    ybar = ybar - fftSizeSub
-                    st.plot_bars(xbar, ybar, eigvals, eigvecs, psAx, 'red')
-                    psAx.invert_yaxis()
-
-                    plt.text(0.05, 0.95, 'eccentricity = ' + str(fmt2 % eccentricity), transform=psAx.transAxes, backgroundcolor = 'w', fontsize=14)
-                    plt.text(0.05, 0.90, 'orientation = ' + str(fmt2 % orientation) + '$^\circ$', transform=psAx.transAxes,backgroundcolor = 'w', fontsize=14)
-                    
-                    plt.xticks(rotation=90) 
-                    plt.xlabel('Spatial lag [km]', fontsize=labelsSize)
-                    plt.ylabel('Spatial lag [km]', fontsize=labelsSize)
-                    titleStr = str(timeLocal) + ', 2D autocorrelation function (ifft(spectrum))'
-                    titleStr = '2D autocorrelation function'
-                    plt.title(titleStr, fontsize=titlesSize)
-                
                 # Draw 2d power spectrum
-                if (plotSpectrum == '2d') | (plotSpectrum == '2dnoise'):
+                if (plotSpectrum == '2d') | (plotSpectrum == '2dnoise') | (plotSpectrum == '2d+autocorr'):
+                    if plotSpectrum == '2d+autocorr':
+                        psAx = plt.subplot(312)
+                    else:
+                        psAx = plt.subplot(122)
+
                     if fourierVar == 'rainrate':
                         psLims =[-50,40]
                     if fourierVar == 'dbz':
                         psLims = [-20,70]
                     extentFFT = (-minFieldSize/2,minFieldSize/2,-minFieldSize/2,minFieldSize/2)
-                    if (plotSpectrum == '2d'):
+                    if (plotSpectrum == '2d') | (plotSpectrum == '2d+autocorr'):
                         # Smooth 2d PS for plotting contours
                         if cov2logPS == False:
                             psd2dsubSmooth = 10.0*np.log10(psd2dsubSmooth)
 
                         # Plot image of 2d PS
                         #psAx.invert_yaxis()
-                        clevsPS = np.arange(-10,75,5)
+                        clevsPS = np.arange(-5,70,5)
                         cmapPS = plt.get_cmap('nipy_spectral', clevsPS.shape[0]) #nipy_spectral, gist_ncar
-                        normPS = colors.BoundaryNorm(clevsPS, cmapPS.N)
+                        normPS = colors.BoundaryNorm(clevsPS, cmapPS.N-1)
                         cmapPS.set_over('white',1)
                         
                         # Compute alpha transparency vector
@@ -831,19 +799,19 @@ while timeLocal <= timeEnd:
                             imPS = psAx.imshow(10.0*np.log10(psd2dsub), interpolation='nearest', cmap=cmapPS, norm=normPS)
                         
                         # Plot smooth contour of 2d PS
-                        percentiles = [70,80,90,95,98,99,99.5]
-                        levelsPS = np.array(st.percentiles(psd2dsubSmooth, percentiles))
-                        print("Contour levels quantiles: ",percentiles)
-                        print("Contour levels 2d PS    : ", levelsPS)
-                        if np.sum(levelsPS) != 0:
-                            im1 = psAx.contour(psd2dsubSmooth, levelsPS, colors='black', alpha=0.25)
-                            im1 = psAx.contour(psd2dsubSmooth, [percZero], colors='black', linestyles='dashed')
+                        # percentiles = [70,80,90,95,98,99,99.5]
+                        # levelsPS = np.array(st.percentiles(psd2dsubSmooth, percentiles))
+                        # print("Contour levels quantiles: ",percentiles)
+                        # print("Contour levels 2d PS    : ", levelsPS)
+                        # if np.sum(levelsPS) != 0:
+                            # im1 = psAx.contour(psd2dsubSmooth, levelsPS, colors='black', alpha=0.25)
+                            # im1 = psAx.contour(psd2dsubSmooth, [percZero], colors='black', linestyles='dashed')
                         
                         # Plot major and minor axis of anisotropy
-                        st.plot_bars(xbar, ybar, eigvals, eigvecs, psAx, 'red')
+                        #st.plot_bars(xbar_ps, ybar_ps, eigvals_ps, eigvecs_ps, psAx, 'red')
                         
-                        plt.text(0.05, 0.95, 'eccentricity = ' + str(fmt2 % eccentricity), transform=psAx.transAxes, backgroundcolor = 'w', fontsize=14)
-                        plt.text(0.05, 0.90, 'orientation = ' + str(fmt2 % orientation) + '$^\circ$', transform=psAx.transAxes,backgroundcolor = 'w', fontsize=14)
+                        #plt.text(0.05, 0.95, 'eccentricity = ' + str(fmt2 % eccentricity_ps), transform=psAx.transAxes, backgroundcolor = 'w', fontsize=14)
+                        #plt.text(0.05, 0.90, 'orientation = ' + str(fmt2 % orientation_ps) + '$^\circ$', transform=psAx.transAxes,backgroundcolor = 'w', fontsize=14)
                         
                         # Create ticks in km
                         ticks_loc = np.arange(0,2*fftSizeSub,1)
@@ -866,8 +834,8 @@ while timeLocal <= timeEnd:
                         psAx.set_yticks(ticks_loc[idxTicksY])
                         psAx.set_yticklabels(ticksListY[idxTicksY], fontsize=13)
 
-                        plt.xlabel('Wavelenght [km]')
-                        plt.ylabel('Wavelenght [km]')
+                        plt.xlabel('Wavelenght [km]', fontsize=labelsSize)
+                        plt.ylabel('Wavelenght [km]', fontsize=labelsSize)
                         
                         #plt.gca().invert_yaxis()
                     else:
@@ -875,14 +843,81 @@ while timeLocal <= timeEnd:
                         
                         imPS = plt.imshow(10*np.log10(psd2dnoise), extent=(extentFFT[0], extentFFT[1], extentFFT[2], extentFFT[3]), vmin=-15, vmax=0)
                         plt.gca().invert_yaxis()
-                    cbar = plt.colorbar(imPS, ticks=clevsPS, spacing='uniform', norm=normPS, extend='max', fraction=0.03)
-                    cbar.ax.tick_params(labelsize=14)
-                    cbar.set_label(unitsSpectrum, fontsize=15)
-                    titleStr = str(timeLocal) + ', 2D power spectrum (rotated by 90$^\circ$)'
+                    cbar = plt.colorbar(imPS, ticks=clevsPS, spacing='uniform', norm=normPS, extend='max', fraction=0.04)
+                    cbar.ax.tick_params(labelsize=colorbarTicksSize)
+                    cbar.set_label(unitsSpectrum, fontsize=unitsSize)
+                    #cbar.ax.set_title(unitsSpectrum, fontsize=unitsSize)
+                    titleStr = '2D power spectrum (rotated by 90$^\circ$)'
                     plt.title(titleStr, fontsize=titlesSize)
+                
+                # Draw autocorrelation function
+                if (plotSpectrum == 'autocorr') | (plotSpectrum == '2d+autocorr'):
+                    if plotSpectrum == '2d+autocorr':
+                        autocorrAx = plt.subplot(313)
+                    else:
+                        autocorrAx = plt.subplot(122)
+                    
+                    maxAutocov = np.max(autocorrSub)
+                    if maxAutocov > 50:
+                        clevsPS = np.arange(0,200,10)
+                    elif maxAutocov > 10:
+                        clevsPS = np.arange(0,50,5)
+                    else:
+                        clevsPS = np.arange(-0.05,1.05,0.05)
+                        clevsPSticks = np.arange(-0.,1.05,0.1)
+                    cmapPS = plt.get_cmap('nipy_spectral', clevsPS.shape[0]) #nipy_spectral, gist_ncar
+                    normPS = colors.BoundaryNorm(clevsPS, cmapPS.N)
+                    cmaplist = [cmapPS(i) for i in range(cmapPS.N)]
+                    # force the first color entry to be white
+                    #cmaplist[0] = (1,1,1,1.0)
+                    
+                    # Create the new map
+                    cmapPS = cmapPS.from_list('Custom cmap', cmaplist, cmapPS.N)
+                    cmapPS.set_under('white',1)
+                    
+                    ext = (-autocorrSizeSub, autocorrSizeSub, -autocorrSizeSub, autocorrSizeSub)
+                    imPS = autocorrAx.imshow(np.flipud(autocorrSub), cmap = cmapPS, norm=normPS, extent = ext)
+                    #cbar = plt.colorbar(imPS, ticks=clevsPS, spacing='uniform', norm=normPS, extend='max', fraction=0.03)
+                    cbar = plt.colorbar(imPS, ticks=clevsPSticks, spacing='uniform', extend='min', norm=normPS,fraction=0.04)
+                    cbar.ax.tick_params(labelsize=colorbarTicksSize)
+                    cbar.set_label('correlation coefficient', fontsize=unitsSize)
+                    
+                    im1 = autocorrAx.contour(autocorrSub, clevsPS, colors='black', alpha = 0.25, extent = ext)
+                    im1 = autocorrAx.contour(autocorrSub, [percZero_autocorr], colors='black', linestyles='dashed', extent = ext) 
+
+                    # Plot major and minor axis of anisotropy
+                    xbar_autocorr = xbar_autocorr - autocorrSizeSub
+                    ybar_autocorr = ybar_autocorr - autocorrSizeSub
+                    st.plot_bars(xbar_autocorr, ybar_autocorr, eigvals_autocorr, eigvecs_autocorr, autocorrAx, 'red')
+                    autocorrAx.invert_yaxis()
+                    # autocorrAx.axis('image')
+                    
+                    if plotSpectrum == '2d+autocorr':
+                        xoffset = 0.05
+                        yoffset = 0.93
+                        yspace = 0.04
+                        eccFontSize = 12
+                    else:
+                        xoffset = 0.05
+                        yoffset = 0.95
+                        yspace = 0.05
+                        eccFontSize = 14                        
+                    
+                    plt.text(xoffset, yoffset, 'eccentricity = ' + str(fmt2 % eccentricity_autocorr), transform=autocorrAx.transAxes, backgroundcolor = 'w', fontsize=eccFontSize)
+                    plt.text(xoffset, yoffset-yspace, 'orientation = ' + str(fmt2 % orientation_autocorr) + '$^\circ$', transform=autocorrAx.transAxes,backgroundcolor = 'w', fontsize=eccFontSize)
+                    
+                    plt.xticks(rotation=90) 
+                    autocorrAx.set_xlabel('Spatial lag [km]', fontsize=labelsSize)
+                    autocorrAx.set_ylabel('Spatial lag [km]', fontsize=labelsSize)
+                    
+                    titleStr = str(timeLocal) + ', 2D autocorrelation function (ifft(spectrum))'
+                    titleStr = '2D autocorrelation function'
+                    autocorrAx.set_title(titleStr, fontsize=titlesSize)
                 
                 # Draw 1D power spectrum
                 if (plotSpectrum == '1d') | (plotSpectrum == '1dnoise'):
+                    psAx = plt.subplot(122)
+                    
                     freqLimBeta1 = np.array([resKm/float(largeScalesLims[0]),resKm/float(largeScalesLims[1])])
                     psdLimBeta1 = intercept_beta1+beta1*10*np.log10(freqLimBeta1)
                     plt.plot(10*np.log10(freqLimBeta1), psdLimBeta1,'b--')
@@ -895,7 +930,7 @@ while timeLocal <= timeEnd:
                     plt.vlines(x=10*np.log10(1.0/scalingBreak_best), ymin=psdLimBeta2[0]-5, ymax = psdLimBeta2[0]+5, linewidth=0.5, color='grey')
                     
                     # Write betas and correlations
-                    startX = 0.7
+                    startX = 0.67
                     startY = 0.95
                     offsetY = 0.04
                     
@@ -904,7 +939,7 @@ while timeLocal <= timeEnd:
                     if weightedOLS == 1:
                         txt = "Weighted ordinary least squares"
 
-                    psAx.text(startX,startY, txt, color='k', transform=psAx.transAxes)
+                    # psAx.text(startX,startY, txt, color='k', transform=psAx.transAxes)
                     
                     txt = r'$\beta_1$ = ' + (fmt2 % beta1) + ",   r = " + (fmt3 % r_beta1)
                     psAx.text(startX,startY-offsetY, txt, color='b', transform=psAx.transAxes)
@@ -918,17 +953,17 @@ while timeLocal <= timeEnd:
                     txt = 'MM = ' + (fmt3 %raincondmean) + ' mm/hr'
                     psAx.text(startX,startY-4*offsetY, txt, transform=psAx.transAxes)
                     
-                    if (rainThresholdWAR < 0.01): 
-                        txt = 'Rmin = ' + (fmt3 % rainThresholdWAR) + ' mm/hr'
-                    else:
-                        txt = 'Rmin = ' + (fmt2 % rainThresholdWAR) + ' mm/hr'
-                    psAx.text(startX,startY-5*offsetY, txt, transform=psAx.transAxes)
+                    # if (rainThresholdWAR < 0.01): 
+                        # txt = 'Rmin = ' + (fmt3 % rainThresholdWAR) + ' mm/hr'
+                    # else:
+                        # txt = 'Rmin = ' + (fmt2 % rainThresholdWAR) + ' mm/hr'
+                    # psAx.text(startX,startY-5*offsetY, txt, transform=psAx.transAxes)
                     
-                    txt = 'Scaling break = ' + str(scalingBreak_best) + ' km'
-                    psAx.text(startX,startY-6*offsetY, txt, transform=psAx.transAxes)
+                    # txt = 'Scaling break = ' + str(scalingBreak_best) + ' km'
+                    # psAx.text(startX,startY-6*offsetY, txt, transform=psAx.transAxes)
                     
-                    txt = 'Zeros = ' + (fmt1 % zerosDBZ) + ' dBZ - ' + (fmt2 % rainThresholdWAR) + ' mm/hr'
-                    psAx.text(startX,startY-7*offsetY, txt, transform=psAx.transAxes, fontsize=10)
+                    # txt = 'Zeros = ' + (fmt1 % zerosDBZ) + ' dBZ - ' + (fmt2 % rainThresholdWAR) + ' mm/hr'
+                    # psAx.text(startX,startY-7*offsetY, txt, transform=psAx.transAxes, fontsize=10)
                     
                     if plotSpectrum == '1dnoise':
                         # Draw 1d noise spectrum
@@ -957,7 +992,7 @@ while timeLocal <= timeEnd:
                         tickLocal = tickLocal/2
                         if tickLocal < resKm:
                             break
-                    ticks = np.array(ticksList)
+                    ticks = np.array(ticksList, dtype=int)
                     ticks_loc = 10.0*np.log10(1.0/ticks)
                     psAx.set_xticks(ticks_loc)
                     psAx.set_xticklabels(ticks)
@@ -991,6 +1026,13 @@ while timeLocal <= timeEnd:
             'dBZ_mean', 'dBZ_std', 'dBZ_cmean', 'dBZ_cstd', 
             'beta1', 'corr_beta1', 'beta2', 'corr_beta2' , 'scaling_break', 'eccentricity', 'orientation']
             
+            if plotSpectrum == '2d':
+                eccentricity = eccentricity_ps
+                orientation = orientation_ps
+            else:
+                eccentricity = eccentricity_autocorr
+                orientation = orientation_autocorr
+                
             # Data
             instantStats = [timeStampStr,
             str(alb), 
@@ -998,22 +1040,22 @@ while timeLocal <= timeEnd:
             str(mle),
             str(ppm),
             str(wei),             
-            fmt3 % war,
+            fmt4 % war,
             fmt5 % rainmean, 
             fmt5 % rainstd,
             fmt5 % raincondmean, 
             fmt5 % raincondstd,        
-            fmt3 % dBZmean, 
-            fmt3 % dBZstd,        
-            fmt3 % dBZcondmean, 
-            fmt3 % dBZcondstd,
-            fmt3 % beta1,
-            fmt3 % r_beta1,
-            fmt3 % beta2,
-            fmt3 % r_beta2,
+            fmt4 % dBZmean, 
+            fmt4 % dBZstd,        
+            fmt4 % dBZcondmean, 
+            fmt4 % dBZcondstd,
+            fmt4 % beta1,
+            fmt4 % r_beta1,
+            fmt4 % beta2,
+            fmt4 % r_beta2,
             int(scalingBreak_best),
-            fmt3 % eccentricity,
-            fmt2 % orientation
+            fmt4 % eccentricity,
+            fmt4 % orientation
             ]
 
             print(instantStats)
