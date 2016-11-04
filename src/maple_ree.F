@@ -5,6 +5,8 @@ c     Urs Germann                                                     c
 c     Version 5 June 2001                                             c
 c     c
 c     f2py -c -m maple_ree maple_ree.F
+c     vx is the V-vector (North->South), image row orientation (origin upper left corner)
+c     vy is the U-vector (West->East), image column orientation (origin upper left corner)
 ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 
 c-----1----------------------------------------------------------------1

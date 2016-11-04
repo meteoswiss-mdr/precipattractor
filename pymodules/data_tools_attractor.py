@@ -381,5 +381,9 @@ def fill_attractor_array_nan(arrayStats, timeStamps_datetime, timeSampMin = 5):
             arrayStats.insert(t+1,[missingDate] + emptyListNaN)
         t = t+1
         tstart = tstart + datetime.timedelta(minutes = timeSampMin)
-    
     return(arrayStats, timeStamps_datetime)
+    
+def print_list_vertical(letters):
+    for s1,s2 in zip(letters[:len(letters)//2], letters[len(letters)//2:]): #len(letters)/2 will work with every paired length list
+       print(s1,s2)    
+    

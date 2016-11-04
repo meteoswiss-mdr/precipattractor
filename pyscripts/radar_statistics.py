@@ -8,7 +8,7 @@ import argparse
 from PIL import Image
 
 import matplotlib as mpl
-mpl.use('Agg')
+#mpl.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -19,6 +19,7 @@ import shutil
 import datetime
 import time
 import warnings
+from collections import OrderedDict
 
 import pyfftw
 from scipy import fftpack,stats
@@ -26,6 +27,7 @@ import scipy.signal as ss
 import scipy.ndimage as ndimage
 import pywt
 from pyearth import Earth
+import cv2
 
 import getpass
 usrName = getpass.getuser()
@@ -35,6 +37,8 @@ import time_tools_attractor as ti
 import io_tools_attractor as io
 import data_tools_attractor as dt
 import stat_tools_attractor as st
+import optical_flow as of
+import maple_ree
 
 import radialprofile
 import gis_base as gis
@@ -186,13 +190,30 @@ proj4stringCH = "+proj=somerc +lat_0=46.95240555555556 +lon_0=7.439583333333333 
 nrFilesDay = 24*(60/timeAccumMin)
 
 ##### LOOP OVER FILES ##########################################################
-timeLocal = timeStart
-dailyStats = []
-tic = time.clock()
-jobs = []
-nrValidFields = 0
-rainfallStack = np.zeros((2,fftDomainSize,fftDomainSize))
 
+# Rainfall stack
+nrValidFields = 0
+stackSize = 12
+rainfallStack = np.zeros((stackSize,fftDomainSize,fftDomainSize))
+waveletStack = [None] * stackSize
+
+# Flow stack
+zStack = []
+tStack = []
+rowStack = []
+colStack = []
+uStack = []
+vStack = []
+
+## Daily arrays to write out
+dailyStats = []
+dailyU = []
+dailyV = []
+dailyTimesUV = []
+
+tic = time.clock()
+
+timeLocal = timeStart
 while timeLocal <= timeEnd:
     ticOneImg = time.clock()
     
@@ -219,6 +240,8 @@ while timeLocal <= timeEnd:
         print('File: ', fileNameWildCard, ' not found.')
     else:
         # Reading GIF file
+        print('-------------------------------------------------------------------------')
+        print('-------------------------------------------------------------------------')
         print('Reading: ', fileName)
         try:
             # Open GIF image
@@ -339,140 +362,181 @@ while timeLocal <= timeEnd:
                 print('Invalid variable string for Fourier transform')
                 sys.exit()
             
+            # Move older rainfall fields down the stack
+            for s in range(0, rainfallStack.shape[0]-1):
+                rainfallStack[s+1,:] = rainfallStack[s,:]
+            # Add last rainfall field on top
+            rainfallStack[0,:] = rainfieldZeros
+            
+            # Increment nr of consecutive valid rainfall fields (war >= 0.01)
+            nrValidFields += 1
+            
+            ########### Compute velocity field ##############
+            # It will be used to estimate the Lagrangian auto-correlation
+            
+            if (nrValidFields >= 2):
+                print('\t')
+                ticOF = time.clock()
+                # extract consecutive images
+                prvs = rainfallStack[1].copy()
+                next = rainfallStack[0].copy()
+                
+                prvs *= 255.0/np.max(prvs)
+                next *= 255.0/np.max(next)
+
+                # 8-bit int
+                prvs = np.ndarray.astype(prvs,'uint8')
+                next = np.ndarray.astype(next,'uint8')
+                
+                # plt.figure()
+                # plt.imshow(prvs)
+                # plt.colorbar()
+                # plt.show()
+                
+                # remove small noise with a morphological operator (opening)
+                prvs = of.morphological_opening(prvs, thr=zerosDBZ, n=5)
+                next = of.morphological_opening(next, thr=zerosDBZ, n=5)
+                
+                #+++++++++++ Optical flow parameters
+                maxCornersST = 500 # Number of asked corners for Shi-Tomasi
+                qualityLevelST = 0.05
+                minDistanceST = 5 # Minimum distance between the detected corners
+                blockSizeST = 15
+                
+                winsizeLK = 100 # Small windows (e.g. 10) lead to unrealistic high speeds
+                nrLevelsLK = 0 # Not very sensitive parameter
+                
+                kernelBandwidth = 100 # Bandwidth of kernel interpolation of vectors
+                
+                maxSpeedKMHR = 100 # Maximum allowed speed
+                nrIQRoutlier = 3 # Nr of IQR above median to consider the vector as outlier (if < 100 km/hr)
+                #++++++++++++++++++++++++++++++++++++
+                
+                # (1b) Shi-Tomasi good features to track
+                p0, nCorners = of.ShiTomasi_features_to_track(prvs, maxCornersST, qualityLevel=qualityLevelST, minDistance=minDistanceST, blockSize=blockSizeST)   
+                print("Nr of points OF ShiTomasi          =", len(p0))
+                
+                # (2) Lucas-Kanade tracking
+                col, row, u, v, err = of.LucasKanade_features_tracking(prvs, next, p0, winSize=(winsizeLK,winsizeLK), maxLevel=nrLevelsLK)
+                
+                # (3) exclude outliers   
+                speed = np.sqrt(u**2 + v**2)
+                q1, q2, q3 = np.percentile(speed, [25,50,75])
+                maxspeed = np.min((maxSpeedKMHR/12, q2 + nrIQRoutlier*(q3 - q1)))
+                minspeed = np.max((0,q2 - 2*(q3 - q1)))
+                keep = (speed <= maxspeed) # & (speed >= minspeed)
+                
+                print('Max speed       =',np.max(speed)*12)
+                print('Median speed    =',np.percentile(speed,50)*12)
+                print('Speed threshold =',maxspeed*12)
+                
+                # Plot histogram of speeds
+                # plt.close()
+                # plt.hist(speed*12, bins=30)
+                # plt.title('min = %1.1f, max = %1.1f' % (minspeed*12,maxspeed*12))
+                # plt.axvline(x=maxspeed*12)
+                # plt.xlabel('Speed [km/hr]')
+                # plt.show()
+                
+                u = u[keep].reshape(np.sum(keep),1)
+                v = v[keep].reshape(np.sum(keep),1)
+                row = row[keep].reshape(np.sum(keep),1)
+                col = col[keep].reshape(np.sum(keep),1)
+                
+                # (4) stack vectors within time window
+                rowStack.append(row)
+                colStack.append(col)
+                uStack.append(u)
+                vStack.append(v)
+            
+                # convert lists of arrays into single arrays
+                row = np.vstack(rowStack)
+                col = np.vstack(colStack) 
+                u = np.vstack(uStack)
+                v = np.vstack(vStack)
+                
+                if (nrValidFields >= 4):
+                    colStack.pop(0)
+                    rowStack.pop(0)
+                    uStack.pop(0)
+                    vStack.pop(0)
+                
+                # (1) decluster sparse motion vectors
+                col, row, u, v = of.declustering(col, row, u, v, R = 20, minN = 3)
+                print("Nr of points OF after declustering =", len(row))
+                
+                # (2) kernel interpolation
+                domainSize = [fftDomainSize, fftDomainSize]
+                colgrid, rowgrid, U, V, b = of.interpolate_sparse_vectors_kernel(col, row, u, v, domainSize, b = kernelBandwidth)
+                print('Kernel bandwith =',b)
+                
+                # Add U,V fields to daily collection
+                dailyU.append(U)
+                dailyV.append(-V) # Reverse V orientation (South -> North)
+                dailyTimesUV.append(ti.datetime2timestring(timeLocal))
+                
+                # Compute advection
+                # resize motion fields by factor f (for advection)
+                f = 0.5
+                if (f<1):
+                    Ures = cv2.resize(U, (0,0), fx=f, fy=f)
+                    Vres = cv2.resize(V, (0,0), fx=f, fy=f) 
+                else:
+                    Ures = U
+                    Vres = V
+                
+                tocOF = time.clock()
+                
+                # Call MAPLE routine for advection
+                net = 1
+                rainfield_lag1 = maple_ree.ree_epol_slio(rainfallStack[1], Vres, Ures, net)
+                
+                # Call MAPLE routine for advection over several time stamps
+                # net = np.min([12, nrValidFields])
+                # for lag in range(2,net):
+                # rainfield_advected = maple_ree.ree_epol_slio(rainfallStack[2], Vres, Ures, net)
+                
+                # plt.close()
+                # plt.subplot(121)
+                # plt.imshow(rainfallStack[1], vmin=8, vmax=55)
+                # plt.subplot(122)
+                # plt.imshow(rainfield_lag1[:,:,-1], vmin=8, vmax=55)
+                # plt.show()
+                # sys.exit()
+                
+                # Resize vector fields for plotting
+                xs, ys, Us, Vs = of.reduce_field_density_for_plotting(colgrid, rowgrid, U, V, 25)
+                
+                # Plot vectors to check if correct
+                # plt.quiver(xs, ys, Us, Vs)
+                # plt.show()
+                    
+                print('Elapsed time OF: ', tocOF - ticOF, ' seconds.')
+                print('\t')
+                
             ########### Compute Wavelet transform ###########
             if plotSpectrum == 'wavelets':
-                wavelet = 'haar'
+                wavelet = 'db4'
                 w = pywt.Wavelet(wavelet)
                 print(w)
-                # cA, (cH, cV, cD) = pywt.dwt2(rainfieldZeros, wavelet)
-                # rainIDWT = pywt.idwt2(cA, cD, wavelet)
+                
+                wavelet_coeff = st.wavelet_decomposition_2d(rainfieldZeros, wavelet, nrLevels = None)
+                
+                ## Add wavelet coeffs to the stack
+                for s in range(0, len(waveletStack)-1):
+                    waveletStack[s+1] = waveletStack[s]
+                waveletStack[0] = wavelet_coeff
                 
                 nrLevels = 6
                 coeffs = pywt.wavedec2(rainfieldZeros, w, level=nrLevels)
                 #cA2, (cH2, cV2, cD2), (cH1, cV1, cD1) = coeffs
                 cA2 = coeffs[0]
                 
-                ####### Use wavelets to generate a field of correlated noise
+                ###### Use wavelets to generate a field of correlated noise
                 # Generate white noise at a given level
                 level2perturb = [3,4,5]
                 nrMembers = 3
                 stochasticEnsemble = st.generate_wavelet_noise(rainfieldZeros, w, nrLevels, level2perturb, nrMembers)
-                
-                nrRows,nrCols = dt.optimal_size_subplot(nrMembers+1)
-                
-                # Adjust figure parameters
-                ratioFig = nrCols/nrRows
-                figWidth = 14
-                colorbar = 'off'
-                fig = plt.figure(figsize=(ratioFig*figWidth,figWidth))
-                padding = 0.01
-                plt.subplots_adjust(hspace=0.05, wspace=0.01)
-                mpl.rcParams['image.interpolation'] = 'nearest'
-
-                # Plot rainfield
-                plt.subplot(nrRows, nrCols, 1)
-                PC = plt.imshow(rainfieldZeros, vmin=15, vmax=45)
-                plt.title('Rainfield [dBZ]',fontsize=15)
-                plt.axis('off')
-                
-                # Plot stochastic ensemble
-                for member in range(0, nrMembers):
-                    plt.subplot(nrRows, nrCols, member+2)
-                    plt.imshow(stochasticEnsemble[member],vmin=15, vmax=45)
-                    plt.title('Member '+ str(member+1), fontsize=15)
-                    plt.axis('off')
-                plt.suptitle('Stochastic ensemble based on wavelet type: ' + wavelet + '\n by perturbing levels ' + str(level2perturb), fontsize=20)
-                
-                stringFigName = '/users/lforesti/results/' + product + yearStr + julianDayStr + hourminStr + '-' + wavelet + '-waveletEnsemble_' + timeAccumMinStr + '.png'
-                plt.savefig(stringFigName, dpi=300)
-                print(stringFigName, ' saved.')
-                plt.close()
-                
-                ###################################
-                # Plot wavelets
-                if plotSpectrum == 'wavelets' and boolPlotting:
-                    pltWavelets = ['H','V','D']
-                    nrPlots = (len(coeffs)-1)*len(pltWavelets)+2
-                    mpl.rcParams['image.interpolation'] = 'none'
-                    
-                    nrRows,nrCols = dt.optimal_size_subplot(nrPlots)
-                    print('Nr. plots = ' + str(nrPlots), ' in ', str(nrRows), 'x', str(nrCols))
-                    
-                    # Adjust figure parameters
-                    ratioFig = nrCols/nrRows
-                    figWidth = 14
-                    colorbar = 'off'
-                    fig = plt.figure(figsize=(ratioFig*figWidth,figWidth))
-                    padding = 0.01
-                    plt.subplots_adjust(hspace=0.05, wspace=0.01)
-                    ###
-                    
-                    # Plot rainfield
-                    ax1 = plt.subplot(nrRows, nrCols, 1)
-                    PC = plt.imshow(rainfieldZeros, vmin=15, vmax=45)
-                        
-                    plt.title('Rainfield [dBZ]')
-                    plt.axis('off')
-                    
-                    # Colorbar
-                    if colorbar == 'on':
-                        divider = make_axes_locatable(ax1)
-                        cax1 = divider.append_axes("right", size="5%", pad=padding)
-                        cbar = plt.colorbar(PC, cax = cax1)
-                    
-                    nplot = 2
-                    for level in range(1,nrLevels+1):   
-                        for p in range(0,len(pltWavelets)):
-                            waveletLevel = nrLevels+1 - level
-                            
-                            # Plot wavelet coefficients for horizontal/vertical/diagonal components
-                            var = coeffs[waveletLevel][p]
-                            minimum = np.percentile(var, 1)
-                            maximum = np.percentile(var, 99)
-                            
-                            ax1 = plt.subplot(nrRows, nrCols, nplot)
-                            PC = plt.imshow(var, vmin=minimum, vmax=maximum, aspect=var.shape[1]/var.shape[0])
-
-                            if p == 0:
-                                titleStr = 'Level ' + str(level) + ' - horizontal'
-                            if p == 1:
-                                titleStr = 'Level ' + str(level) + ' - vertical'
-                            if p == 2:
-                                titleStr = 'Level ' + str(level) + ' - diagonal'
-                            plt.title(titleStr)
-                            plt.axis('off')
-                            
-                            # Colorbar
-                            if colorbar == 'on':
-                                divider = make_axes_locatable(ax1)
-                                cax1 = divider.append_axes("right", size="5%", pad=padding)
-                                cbar = plt.colorbar(PC, cax = cax1)
-
-                            nplot = nplot + 1
-                    
-                    # Plot Approximation
-                    minimum = np.percentile(cA2, 1)
-                    maximum = np.percentile(cA2, 99)
-
-                    ax1 = plt.subplot(nrRows, nrCols, nplot)
-                    PC = plt.imshow(cA2, aspect=cA2.shape[1]/cA2.shape[0])
-
-                    plt.title('Approximation')
-                    plt.axis('off')
-                    
-                    # Colorbar
-                    if colorbar == 'on':
-                        divider = make_axes_locatable(ax1)
-                        cax1 = divider.append_axes("right", size="5%", pad=padding)
-                        cbar = plt.colorbar(PC, cax = cax1)
-
-                    plt.suptitle('Wavelet type: ' + wavelet, fontsize=20)
-                    #plt.show()
-                    waveletDirs = "".join(pltWavelets)
-                    stringFigName = '/users/lforesti/results/' + product + yearStr + julianDayStr + hourminStr + '_' + waveletDirs + '-' + wavelet + '-wavelet_' + timeAccumMinStr + '.png'
-                    plt.savefig(stringFigName, dpi=300)
-                    print(stringFigName, ' saved.')
-                    sys.exit()
             
             ########### Compute Fourier power spectrum ###########
             ticFFT = time.clock()
@@ -500,7 +564,7 @@ while timeLocal <= timeEnd:
             psd2dNoShift = np.abs(fprecipNoShift)**2/(fftDomainSize*fftDomainSize)
             
             # Compute autocorrelation using inverse FFT of spectrum
-            if (plotSpectrum == 'autocorr') or (plotSpectrum == '1d') or (plotSpectrum == '2d+autocorr'):
+            if (plotSpectrum == 'autocorr') or (plotSpectrum == '1d') or (plotSpectrum == '2d+autocorr') or (plotSpectrum == 'wavelets'):
                 # Compute autocorrelation
                 autocorr,_ = st.compute_autocorrelation_fft(rainfieldZeros*window, FFTmod = 'NUMPY')
                 
@@ -509,17 +573,7 @@ while timeLocal <= timeEnd:
                 percentileZero = 90
                 autocorrSub, eccentricity_autocorr, orientation_autocorr, xbar_autocorr, ybar_autocorr, eigvals_autocorr, eigvecs_autocorr, percZero_autocorr,_ = st.compute_fft_anisotropy(autocorr, autocorrSizeSub, percentileZero, rotation=False)
 
-                # Test to recompute 2d spectrum from autocorr function
-                # autocorrNoShift = np.fft.fft2(autocorrSub)
-                # autocorr = np.fft.fftshift(autocorrNoShift)
-                # psd2d = np.abs(autocorr)**2/(fftDomainSize*fftDomainSize)
-                # print(10.0*np.log10(psd2d))
-                # plt.imshow(autocorrSub)
-                # plt.show()
-                # plt.imshow(10.0*np.log10(psd2d))
-                # plt.show()
-                # sys.exit()
-            if (plotSpectrum == '2d') or (plotSpectrum == '2d+autocorr'):
+            if (plotSpectrum == '2d') or (plotSpectrum == '2d+autocorr') or (plotSpectrum == 'wavelets'):
                 cov2logPS = True # Whether to compute the anisotropy on the log of the 2d PS
                 # Extract central region of 2d power spectrum and compute covariance
                 if cov2logPS:
@@ -647,14 +701,227 @@ while timeLocal <= timeEnd:
             rainstd = np.nanstd(rainrate.ravel())
             raincondmean = np.nanmean(rainrateC.ravel())
             raincondstd = np.nanstd(rainrateC.ravel())
-
+            
             # Compute field statistics in dBZ units
             dBZmean = np.nanmean(dBZ.ravel())
             dBZstd = np.nanstd(dBZ.ravel())
             dBZcondmean = np.nanmean(dBZC.ravel())
             dBZcondstd = np.nanstd(dBZC.ravel())
             
-            ################ PLOTTING RAINFIELD AND SPECTRUM #################################
+            # Compute Eulerian Auto-correlation 
+            if nrValidFields >= 2:
+                corr_eul_lag1 = np.corrcoef(rainfallStack[0,:].flatten(), rainfallStack[1,:].flatten())
+                corr_eul_lag1 = corr_eul_lag1[0,1]
+                print("Eulerian correlation       =", fmt3 % corr_eul_lag1)
+                
+                # Compute Eulerian correlation at each wavelet coeff level
+                # corr_eul_wavelet_levels = []
+                # for level in range(0,len(wavelet_coeff)):
+                    # corr_eul_level = np.corrcoef(np.array(waveletStack[0][level]).flatten(), np.array(waveletStack[1][level]).flatten())
+                    # corr_eul_level = corr_eul_level[0,1]
+                    # corr_eul_wavelet_levels.append(corr_eul_level)
+                # print(corr_eul_wavelet_levels)
+                # plt.figure()
+                # plt.scatter(rainfallStack[0,:], rainfallStack[1,:])
+                # plt.show()
+            else:
+                corr_eul_lag1 = np.nan
+            
+            # Compute Lagrangian auto-correlation
+            if nrValidFields >= 2:
+                corr_lagr_lag1 = np.corrcoef(rainfield_lag1.flatten(), rainfallStack[0,:].flatten())
+                corr_lagr_lag1 = corr_lagr_lag1[0,1]
+                print("Lagrangian correlation     =", fmt3 % corr_lagr_lag1)
+                print("Diff. Lagr-Eul correlation =", fmt3 % (corr_lagr_lag1 - corr_eul_lag1))
+                # plt.figure()
+                # plt.scatter(rainfallStack[0,:], rainfallStack[1,:])
+                # plt.show()
+                corr_lagr_lags = []
+                for lag in range(1,net):
+                    corr_lagr = np.corrcoef(rainfield_advected[lag].flatten(), rainfallStack[0,:].flatten())
+                    corr_lagr_lags.append(corr_lagr[0,1])
+                print('Lagrangian correlation lags =', corr_lagr_lags)
+            else:
+                corr_lagr_lag1 = np.nan
+            
+            ################### COLLECT DAILY STATS 
+            timeStampStr = ti.datetime2timestring(timeLocal)
+            
+            # Headers
+            headers = ['time', 'alb', 'doe', 'mle', 'ppm', 'wei', 'war', 'r_mean', 'r_std', 'r_cmean', 'r_cstd',
+            'dBZ_mean', 'dBZ_std', 'dBZ_cmean', 'dBZ_cstd', 
+            'beta1', 'corr_beta1', 'beta2', 'corr_beta2' , 'scaling_break', 'eccentricity', 'orientation',
+            'corr_eul_lag1', 'corr_lagr_lag1']
+            
+            if plotSpectrum == '2d':
+                eccentricity = eccentricity_ps
+                orientation = orientation_ps
+            else:
+                eccentricity = eccentricity_autocorr
+                orientation = orientation_autocorr
+                
+            # Data
+            instantStats = [timeStampStr,
+            str(alb), 
+            str(doe), 
+            str(mle),
+            str(ppm),
+            str(wei),             
+            fmt4 % war,
+            fmt5 % rainmean, 
+            fmt5 % rainstd,
+            fmt5 % raincondmean, 
+            fmt5 % raincondstd,        
+            fmt4 % dBZmean, 
+            fmt4 % dBZstd,        
+            fmt4 % dBZcondmean, 
+            fmt4 % dBZcondstd,
+            fmt4 % beta1,
+            fmt4 % r_beta1,
+            fmt4 % beta2,
+            fmt4 % r_beta2,
+            int(scalingBreak_best),
+            fmt4 % eccentricity,
+            fmt4 % orientation,
+            fmt4 % corr_eul_lag1,
+            fmt4 % corr_lagr_lag1
+            ]
+            print('+++++++ Radar statistics +++++++')
+            outputPrint = OrderedDict(zip(headers, instantStats))
+            print(outputPrint)
+            print('++++++++++++++++++++++++++++++++')
+            
+            # Append statistics to daily array
+            dailyStats.append(instantStats)
+            
+            ######################## PLOT WAVELETS ######################
+            if plotSpectrum == 'wavelets' and boolPlotting:
+                nrRows,nrCols = dt.optimal_size_subplot(nrMembers+1)
+                # Adjust figure parameters
+                ratioFig = nrCols/nrRows
+                figWidth = 14
+                colorbar = 'off'
+                fig = plt.figure(figsize=(ratioFig*figWidth,figWidth))
+                padding = 0.01
+                plt.subplots_adjust(hspace=0.05, wspace=0.01)
+                mpl.rcParams['image.interpolation'] = 'nearest'
+
+                # Plot rainfield
+                plt.subplot(nrRows, nrCols, 1)
+                PC = plt.imshow(rainfieldZeros, vmin=15, vmax=45)
+                plt.title('Rainfield [dBZ]',fontsize=15)
+                plt.axis('off')
+                
+                # Plot stochastic ensemble
+                for member in range(0, nrMembers):
+                    plt.subplot(nrRows, nrCols, member+2)
+                    plt.imshow(stochasticEnsemble[member],vmin=15, vmax=45)
+                    plt.title('Member '+ str(member+1), fontsize=15)
+                    plt.axis('off')
+                plt.suptitle('Stochastic ensemble based on wavelet type: ' + wavelet + '\n by perturbing levels ' + str(level2perturb), fontsize=20)
+                
+                stringFigName = '/users/lforesti/results/' + product + yearStr + julianDayStr + hourminStr + '-' + wavelet + '-waveletEnsemble_' + timeAccumMinStr + '.png'
+                plt.savefig(stringFigName, dpi=300)
+                print(stringFigName, ' saved.')
+                plt.close()
+            
+                # Plots of the wavelet approximation at each scale
+                nrPlots = len(wavelet_coeff)
+                nrRows,nrCols = dt.optimal_size_subplot(nrPlots)
+                
+                for scale in range(1, nrPlots+1):
+                    plt.subplot(nrRows, nrCols, scale)
+                    plt.imshow(wavelet_coeff[scale-1], interpolation='nearest')
+                    plt.colorbar()
+                plt.show()
+                sys.exit()
+                
+                # Plot of all the horizontal, diagonal and vertical components of the wavelet transform
+                pltWavelets = ['H','V','D']
+                nrPlots = (len(coeffs)-1)*len(pltWavelets)+2
+                mpl.rcParams['image.interpolation'] = 'none'
+                
+                nrRows,nrCols = dt.optimal_size_subplot(nrPlots)
+                print('Nr. plots = ' + str(nrPlots), ' in ', str(nrRows), 'x', str(nrCols))
+                
+                # Adjust figure parameters
+                ratioFig = nrCols/nrRows
+                figWidth = 14
+                colorbar = 'off'
+                fig = plt.figure(figsize=(ratioFig*figWidth,figWidth))
+                padding = 0.01
+                plt.subplots_adjust(hspace=0.05, wspace=0.01)
+                ###
+                
+                # Plot rainfield
+                ax1 = plt.subplot(nrRows, nrCols, 1)
+                PC = plt.imshow(rainfieldZeros, vmin=15, vmax=45)
+                    
+                plt.title('Rainfield [dBZ]')
+                plt.axis('off')
+                
+                # Colorbar
+                if colorbar == 'on':
+                    divider = make_axes_locatable(ax1)
+                    cax1 = divider.append_axes("right", size="5%", pad=padding)
+                    cbar = plt.colorbar(PC, cax = cax1)
+                
+                nplot = 2
+                for level in range(1,nrLevels+1):   
+                    for p in range(0,len(pltWavelets)):
+                        waveletLevel = nrLevels+1 - level
+                        
+                        # Plot wavelet coefficients for horizontal/vertical/diagonal components
+                        var = coeffs[waveletLevel][p]
+                        minimum = np.percentile(var, 1)
+                        maximum = np.percentile(var, 99)
+                        
+                        ax1 = plt.subplot(nrRows, nrCols, nplot)
+                        PC = plt.imshow(var, vmin=minimum, vmax=maximum, aspect=var.shape[1]/var.shape[0])
+
+                        if p == 0:
+                            titleStr = 'Level ' + str(level) + ' - horizontal'
+                        if p == 1:
+                            titleStr = 'Level ' + str(level) + ' - vertical'
+                        if p == 2:
+                            titleStr = 'Level ' + str(level) + ' - diagonal'
+                        plt.title(titleStr)
+                        plt.axis('off')
+                        
+                        # Colorbar
+                        if colorbar == 'on':
+                            divider = make_axes_locatable(ax1)
+                            cax1 = divider.append_axes("right", size="5%", pad=padding)
+                            cbar = plt.colorbar(PC, cax = cax1)
+
+                        nplot = nplot + 1
+                
+                # Plot Approximation
+                minimum = np.percentile(cA2, 1)
+                maximum = np.percentile(cA2, 99)
+
+                ax1 = plt.subplot(nrRows, nrCols, nplot)
+                PC = plt.imshow(cA2, aspect=cA2.shape[1]/cA2.shape[0])
+
+                plt.title('Approximation')
+                plt.axis('off')
+                
+                # Colorbar
+                if colorbar == 'on':
+                    divider = make_axes_locatable(ax1)
+                    cax1 = divider.append_axes("right", size="5%", pad=padding)
+                    cbar = plt.colorbar(PC, cax = cax1)
+
+                plt.suptitle('Wavelet type: ' + wavelet, fontsize=20)
+                #plt.show()
+                waveletDirs = "".join(pltWavelets)
+                stringFigName = '/users/lforesti/results/' + product + yearStr + julianDayStr + hourminStr + '_' + waveletDirs + '-' + wavelet + '-wavelet_' + timeAccumMinStr + '.png'
+                plt.savefig(stringFigName, dpi=300)
+                print(stringFigName, ' saved.')
+                sys.exit()
+                
+            ################ PLOTTING RAINFIELD #################################
+            # ++++++++++++
             if boolPlotting:
                 titlesSize = 20
                 labelsSize = 18
@@ -686,7 +953,11 @@ while timeLocal <= timeEnd:
                 
                 # Draw shapefile
                 gis.read_plot_shapefile(fileNameShapefile, proj4stringWGS84, proj4stringCH,  ax = rainAx, linewidth = 0.75)
-
+                
+                if nrValidFields >= 2:
+                    ycoord_flipped = fftDomainSize-1-ys
+                    plt.quiver(Xmin+xs*1000, Ymin+ycoord_flipped*1000, Us, -Vs, angles = 'xy', scale_units='xy')
+                    #plt.quiver(Xmin+x*1000, Ymin+ycoord_flipped*1000, u, -v, angles = 'xy', scale_units='xy')
                 # Colorbar
                 cbar = plt.colorbar(rainIm, ticks=clevs, spacing='uniform', norm=norm, extend='max', fraction=0.04)
                 cbar.ax.tick_params(labelsize=colorbarTicksSize)
@@ -722,6 +993,11 @@ while timeLocal <= timeEnd:
                 # Add product quality within image
                 dataQualityTxt = "Quality = " + str(dataQuality)
                 
+                plt.text(-0.15,-0.12, "Eulerian      correlation = " + fmt3 % corr_eul_lag1, transform=rainAx.transAxes)
+                plt.text(-0.15,-0.15, "Lagrangian correlation = " + fmt3 % corr_lagr_lag1, transform=rainAx.transAxes)
+                diffPercEulLagr = (corr_lagr_lag1 - corr_eul_lag1)*100
+                plt.text(-0.15,-0.18, "Difference Lagr/Eul      = " + fmt2 % diffPercEulLagr + ' %', transform=rainAx.transAxes)
+                
                 # Set X and Y ticks for coordinates
                 xticks = np.arange(400, 900, 100)
                 yticks = np.arange(0, 500 ,100)
@@ -730,42 +1006,9 @@ while timeLocal <= timeEnd:
                 plt.xlabel('Swiss Easting [km]', fontsize=labelsSize)
                 plt.ylabel('Swiss Northing [km]', fontsize=labelsSize)
                 
-                #################### PLOT SPECTRUM ###########################################################
-
-                ### Test to generate power law noise using the observed power spectrum
-                if (plotSpectrum == '1dnoise') | (plotSpectrum == '2dnoise') | (plotSpectrum == 'noisefield'):
-                    psAx = plt.subplot(122)
-                    # Generate a filed of white noise
-                    randValues = np.random.randn(fftDomainSize,fftDomainSize)
-                    # Compute the FFT of the white noise
-                    fnoise = np.fft.fft2(randValues)
-                    
-                    # Multiply the FFT of white noise with the FFT of the Precip field
-                    fcorrNoise = fnoise*fprecipNoShift
-                    # Do the inverse FFT
-                    corrNoise = np.fft.ifft2(fcorrNoise)
-                    # Get the real part
-                    corrNoiseReal = np.array(corrNoise.real)
-                    
-                    # Compute spectrum of noise
-                    fnoiseShift = np.fft.fftshift(fnoise)
-                    psd2dnoise = np.abs(fnoiseShift)**2/(fftDomainSize*fftDomainSize)
-                    # Compute 1D radially averaged power spectrum
-                    bin_size = 1
-                    nr_pixelsNoise, bin_centersNoise, psd1dnoise = radialprofile.azimuthalAverage(psd2dnoise, binsize=bin_size, return_nr=True)
-                    psd1dnoise = psd1dnoise[validBins]
-                    # Compute power difference w.r.t. precip spectrum
-                    powerDiff = psd1dnoise[0] - psd1d[0]
-                    #print(powerDiff)
-                    psd1dnoise = psd1dnoise - powerDiff
-                    
-                # Draw noise field
-                if plotSpectrum == 'noisefield':
-                    noiseIm = plt.imshow(corrNoiseReal,interpolation='nearest', cmap=cmap)
-                    titleStr = str(timeLocal) + ', Power law noise'
-                    cbar = plt.colorbar(noiseIm, spacing='uniform', norm=norm, extend='max', fraction=0.03)
-                
-                # Draw 2d power spectrum
+                #################### PLOT SPECTRA ###########################################################
+               
+                #++++++++++++ Draw 2d power spectrum
                 if (plotSpectrum == '2d') | (plotSpectrum == '2dnoise') | (plotSpectrum == '2d+autocorr'):
                     if plotSpectrum == '2d+autocorr':
                         psAx = plt.subplot(312)
@@ -850,7 +1093,7 @@ while timeLocal <= timeEnd:
                     titleStr = '2D power spectrum (rotated by 90$^\circ$)'
                     plt.title(titleStr, fontsize=titlesSize)
                 
-                # Draw autocorrelation function
+                #++++++++++++ Draw autocorrelation function
                 if (plotSpectrum == 'autocorr') | (plotSpectrum == '2d+autocorr'):
                     if plotSpectrum == '2d+autocorr':
                         autocorrAx = plt.subplot(313)
@@ -914,7 +1157,7 @@ while timeLocal <= timeEnd:
                     titleStr = '2D autocorrelation function'
                     autocorrAx.set_title(titleStr, fontsize=titlesSize)
                 
-                # Draw 1D power spectrum
+                #++++++++++++ Draw 1D power spectrum
                 if (plotSpectrum == '1d') | (plotSpectrum == '1dnoise'):
                     psAx = plt.subplot(122)
                     
@@ -1000,6 +1243,7 @@ while timeLocal <= timeEnd:
                 #plt.gcf().subplots_adjust(bottom=0.15, left=0.20)
                 fig.tight_layout()
                 
+                ########### SAVE AND COPY PLOTS
                 # Save plot in scratch
                 analysisType = plotSpectrum + 'PS'
                 stringFigName, inDir,_ = io.get_filename_stats(inBaseDir, analysisType, timeLocal, product, timeAccumMin=timeAccumMin, quality=0, minR=rainThresholdWAR, wols=weightedOLS, format='png')
@@ -1017,97 +1261,71 @@ while timeLocal <= timeEnd:
                 os.system(cmd)
                 shutil.copy(stringFigName, stringFigNameOut)
                 print('Copied: ', stringFigName, ' to ', stringFigNameOut)
-                
-            ################### Collect daily stats in array
-            timeStampStr = ti.datetime2timestring(timeLocal)
-            
-            # Headers
-            headers = ['time', 'alb', 'doe', 'mle', 'ppm', 'wei', 'war', 'r_mean', 'r_std', 'r_cmean', 'r_cstd',
-            'dBZ_mean', 'dBZ_std', 'dBZ_cmean', 'dBZ_cstd', 
-            'beta1', 'corr_beta1', 'beta2', 'corr_beta2' , 'scaling_break', 'eccentricity', 'orientation']
-            
-            if plotSpectrum == '2d':
-                eccentricity = eccentricity_ps
-                orientation = orientation_ps
-            else:
-                eccentricity = eccentricity_autocorr
-                orientation = orientation_autocorr
-                
-            # Data
-            instantStats = [timeStampStr,
-            str(alb), 
-            str(doe), 
-            str(mle),
-            str(ppm),
-            str(wei),             
-            fmt4 % war,
-            fmt5 % rainmean, 
-            fmt5 % rainstd,
-            fmt5 % raincondmean, 
-            fmt5 % raincondstd,        
-            fmt4 % dBZmean, 
-            fmt4 % dBZstd,        
-            fmt4 % dBZcondmean, 
-            fmt4 % dBZcondstd,
-            fmt4 % beta1,
-            fmt4 % r_beta1,
-            fmt4 % beta2,
-            fmt4 % r_beta2,
-            int(scalingBreak_best),
-            fmt4 % eccentricity,
-            fmt4 % orientation
-            ]
-
-            print(instantStats)
-            dailyStats.append(instantStats)
         else:
             nrValidFields = 0 # Reset to 0 the number of valid fields with consecutive rainfall
             print('Not enough rain to compute statistics')
+        
+    ############ WRITE OUT DAILY STATS ###########################
+    print('------------------')
+    print('Nr valid samples during day: ', len(dailyStats)) 
+    minNrDailySamples = 2
+    conditionForWriting = (len(dailyStats) >= minNrDailySamples) and ((hourminStr == '0000') or (timeLocal == timeEnd))
+    
+    if conditionForWriting: 
+        # List to numpy array 
+        dailyStats = np.array(dailyStats) 
+        
+        # Write stats in the directory of previous day if last time stamp (midnight of next day) 
+        timePreviousDay = timeLocal - datetime.timedelta(days = 1) 
+                  
+        # Generate filenames 
+        analysisType = 'STATS' 
+        if hourminStr == '0000': 
+            fileNameStats,_,_ = io.get_filename_stats(inBaseDir, analysisType, timePreviousDay, product, timeAccumMin=timeAccumMin,\
+            quality=0, minR=rainThresholdWAR, wols=weightedOLS, variableBreak = variableBreak, format=args.format) 
+        else: 
+            fileNameStats,_,_ = io.get_filename_stats(inBaseDir, analysisType, timeLocal, product, timeAccumMin=timeAccumMin,\
+            quality=0, minR=rainThresholdWAR, wols=weightedOLS, variableBreak = variableBreak, format=args.format) 
+        
+        # Write out files 
+        spectralSlopeLims = [largeScalesLims_best[0], largeScalesLims_best[1], smallScalesLims_best[1]]
+        if (boolPlotting == False): 
+            if args.format == 'csv': 
+                # Write out CSV file 
+                io.write_csv_globalstats(fileNameStats, headers, dailyStats) 
+            elif args.format == 'netcdf': 
+                # Write out NETCDF file 
+                io.write_netcdf_globalstats(fileNameStats, headers, dailyStats, str(rainThresholdWAR), str(weightedOLS), spectralSlopeLims) 
+        
+        print(fileNameStats, ' saved.') 
+        
+        #### Print out some average daily stats
+        eulerian_corr_vector = np.array(dt.get_column_list(dailyStats,22)).astype(float)
+        lagrangian_corr_vector = np.array(dt.get_column_list(dailyStats,23)).astype(float)
+        print('Daily average Eulerian correlation    =',np.nanmean(eulerian_corr_vector))
+        print('Daily average Lagrangian correlation  =',np.nanmean(lagrangian_corr_vector))
+        print('Daily difference Eul-Lagr correlation =',100*(np.nanmean(lagrangian_corr_vector) - np.nanmean(eulerian_corr_vector)),'%')
+        
+        #### Reset dailyStats array 
+        dailyStats = [] 
 
-    # Write out daily stats
-    print('Nr valid samples during day: ', len(dailyStats))
-    if len(dailyStats) > 10 and ((hourminStr == '0000') or (timeLocal == timeEnd)):
-        # List to numpy array
-        dailyStats = np.array(dailyStats)
+    ############ WRITE OUT DAILY VELOCITY FIELDS ###########################
+    if conditionForWriting:
+        analysisType = 'VELOCITY'
+        fileNameFlow,_,_ = io.get_filename_stats(inBaseDir, analysisType, timeLocal, product, \
+        timeAccumMin=timeAccumMin, quality=0, format='netcdf')
         
-        # Write stats in the directory of previous day if last time stamp (midnight of next day)
-        timePreviousDay = timeLocal - datetime.timedelta(days = 1)
+        xvec = Xmin + colgrid*1000
+        yvec = Ymax - rowgrid*1000 # turn Y vector to start from highest value on top
+        io.write_netcdf_flow(fileNameFlow, dailyTimesUV, xvec, yvec, dailyU, dailyV)
+        print(fileNameFlow, 'saved.')
         
-        # Get spectral slope limits for fitting
-        spectralSlopeLims = [maxBeta1rangeKM, minBeta2rangeKM]
-        
-        # Generate filenames
-        analysisType = 'STATS'
-        if hourminStr == '0000':
-            fileNameStats,_,_ = io.get_filename_stats(inBaseDir, analysisType, timePreviousDay, product, timeAccumMin=timeAccumMin, \
-            quality=0, minR=rainThresholdWAR, wols=weightedOLS, variableBreak = variableBreak, format=args.format)
-        else:
-            fileNameStats,_,_ = io.get_filename_stats(inBaseDir, analysisType, timeLocal, product, timeAccumMin=timeAccumMin, \
-            quality=0, minR=rainThresholdWAR, wols=weightedOLS, variableBreak = variableBreak, format=args.format)
-        
-        # Write out files
-        if (boolPlotting == False):
-            if args.format == 'csv':
-                # Write out CSV file
-                io.write_csv(fileNameStats, headers, dailyStats)
-            elif args.format == 'netcdf':
-                # Write out NETCDF file
-                io.write_netcdf(fileNameStats, headers, dailyStats, str(rainThresholdWAR), str(weightedOLS), spectralSlopeLims)
-                
-            print(fileNameStats, ' saved.')
-            
-            # Copy file from /scratch to /store
-            fileNameStatsOut, outDir,_ = io.get_filename_stats(outBaseDir, analysisType, timeLocal, product, timeAccumMin=timeAccumMin, \
-            quality=0, minR=rainThresholdWAR,  wols=weightedOLS, variableBreak = variableBreak, format=args.format)
-            
-            cmd = 'mkdir -p ' + outDir
-            os.system(cmd)
-            shutil.copy(fileNameStats, fileNameStatsOut)
-            #print('Copied: ', fileNameStats, ' to ', fileNameStatsOut)
-        
-        # Reset dailyStats array
-        dailyStats = []
-
+        #### Reset daily U,V arrays 
+        dailyU = []
+        dailyV = []
+        dailyTimesUV = []        
+    
+    ####### UPDATE TIME STAMPS    
     # Add 5 minutes (or one hour if working with longer accumulations)
     timeLocal = timeLocal + datetime.timedelta(minutes = timeSampMin)
     tocOneImg = time.clock()

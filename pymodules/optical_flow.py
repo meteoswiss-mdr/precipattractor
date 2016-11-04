@@ -81,6 +81,16 @@ def threshold_features_to_track(image, maxCorners, minThr = 0.08, blockSize = 30
 def LucasKanade_features_tracking(prvs, next, p0, winSize=(35,35), maxLevel=10):
     '''
     Function to call the Lucas-Kanade features tracking algorithm
+    Returns
+    -------
+    x0 : float
+        matrix column of the starting location of the vector
+    y0 : float
+        matrix row of the starting location of the vector
+    u : float
+        u-component of the vector from x0 to x1 (West->East)
+    v : float
+        v-component of the vector from x0 to x1 (North->South)
     '''
     
     # LK parameters
@@ -226,13 +236,13 @@ def interpolate_sparse_vectors_kernel(x, y, u, v, domainSize, b = []):
     # compute  distances
     points = np.column_stack((x,y))
     D = cdist(points,grid, 'euclidean')
-    
+
     # get bandwidth if empty argument
     if not b:
         n = points.shape[0]
         sigma = np.std(D[:])
         b = silverman(sigma,n)
-    
+        
     # compute kernel weights
     weights = gaussian_kernel(D,b)
    
@@ -247,7 +257,7 @@ def interpolate_sparse_vectors_kernel(x, y, u, v, domainSize, b = []):
     U = U.reshape(domainSize[0],domainSize[1])
     V = V.reshape(domainSize[0],domainSize[1])
     
-    return(xgrid, ygrid, U, V)
+    return(xgrid, ygrid, U, V, b)
     
     
 def interpolate_sparse_vectors_linear(x, y, u, v, domainSize):

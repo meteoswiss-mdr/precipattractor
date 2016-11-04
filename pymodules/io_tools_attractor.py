@@ -58,6 +58,37 @@ def get_filename_stats(inBaseDir, analysisType, timeDate, product='AQC', timeAcc
     fileName = os.path.basename(fullName)
 
     return(fullName, dirName, fileName)
+
+def get_filename_velocity(inBaseDir, analysisType, timeDate, product='AQC', timeAccumMin=5, quality=0, format='netcdf'):
+    if format == 'netcdf':
+        extension = '.nc'
+    elif format == 'csv':
+        extension = '.csv'
+    elif format == 'png':
+        extension = '.png'
+    elif format == 'gif':
+        extension = '.gif'
+    else:
+        print('Wrong file format in get_filename_velocity')
+        sys.exit(1)
+
+    # Create time timestamp strings
+    timeAccumMinStr = '%05i' % (timeAccumMin)
+    year, yearStr, julianDay, julianDayStr = ti.parse_datetime(timeDate)
+    hourminStr = ti.get_HHmm_str(timeDate.hour, timeDate.minute)
+    subDir = ti.get_subdir(timeDate.year, julianDay)
+        
+    inDir = inBaseDir + subDir
+    
+    ### Define filename of statistics
+    fullName = inDir + product + '_' + analysisType + '_' + yearStr + julianDayStr + hourminStr + str(quality) + \
+    '_' + timeAccumMinStr + extension
+    
+    # Get directory name and base filename
+    dirName = inDir
+    fileName = os.path.basename(fullName)
+
+    return(fullName, dirName, fileName)
     
 def get_filename(inBaseDir, analysisType, timeDate, varNames, varValues, product='AQC', timeAccumMin=5, quality=0, format='netcdf', sep='_'):
     if format == 'netcdf':
@@ -175,7 +206,7 @@ def netcdf_list2array(timeStart,timeEnd, inBaseDir, variableNames = [], analysis
         try:
             # Read netcdf
             if len(variableNames) > 0:
-                arrayStats,_ = read_netcdf(fileName, variableNames)
+                arrayStats,_ = read_netcdf_globalstats(fileName, variableNames)
             else:
                 arrayStats, variableNames = read_netcdf(fileName)
 
@@ -203,7 +234,7 @@ def netcdf_list2array(timeStart,timeEnd, inBaseDir, variableNames = [], analysis
 
     return(listStats, variableNames)
     
-def write_netcdf(fileName, headers, dataArray, lowRainThreshold, boolWOLS, spectralSlopeLims):
+def write_netcdf_globalstats(fileName, headers, dataArray, lowRainThreshold, boolWOLS, spectralSlopeLims):
     nrSamples = dataArray.shape[0]
     if boolWOLS == 1:
         strWeightedOLS = "Weighted Ordinary Least Squares"
@@ -296,7 +327,7 @@ def write_netcdf(fileName, headers, dataArray, lowRainThreshold, boolWOLS, spect
             
     nc_fid.close()
     
-def read_netcdf(fileName, variableNames = None):
+def read_netcdf_globalstats(fileName, variableNames = None):
     # Open data set
     nc_fid = Dataset(fileName, 'r', format='NETCDF4')
     
@@ -323,6 +354,61 @@ def read_netcdf(fileName, variableNames = None):
     # Return floating numpy array
     # dataArray = np.array(dataArray).T 
     return(dataArray, variableNames)
+ 
+def write_netcdf_flow(fileName, timeStamps, xvec, yvec, Ufields, Vfields, noData=-999.0):
+    '''
+    Function to write out one flow field to netCDF file
+    '''
+    if type(timeStamps) is not list:
+        if type(timeStamps) is np.ndarray:
+            timeStamps = timeStamps.tolist()
+        else:
+            timeStamps = [timeStamps]
+    
+    # Create netCDF Dataset
+    nc_fid = Dataset(fileName, 'w', format='NETCDF4')
+    nc_fid.title = 'Apparent radar velocity field'
+    nc_fid.institution = 'MeteoSwiss, Locarno-Monti'
+    nc_fid.description ="Motion vectors computed using the Lucas-Kanade tracking algorithm and gridded by Kernel interpolation"
+    nc_fid.comment = 'File generated the ' + str(datetime.datetime.now()) + '.'
+    nc_fid.noData = noData
+    
+    # Dimensions
+    nrSamples = len(timeStamps)
+    nc_fid.createDimension('time', nrSamples) # Much larger file if putting 'None' (unlimited size) 
+    nc_time = nc_fid.createVariable('time', 'i8', dimensions=('time'))
+    nc_time.description = "Timestamp (UTC)"
+    nc_time.units = "%YYYY%MM%DD%HH%mm%SS"
+    nc_time[:] = timeStamps
+    
+    dimNames = ['x','y']
+    dimensions = [int(xvec.shape[0]),
+                  int(yvec.shape[0])]
+    for i in range(len(dimensions)):
+        nc_fid.createDimension(dimNames[i],dimensions[i])
+    
+    # Variables
+    w_nc_x = nc_fid.createVariable('x', 'f4', dimensions='x')
+    w_nc_x.description = "Swiss easting"
+    w_nc_x.units = "km"
+    w_nc_x[:] = xvec/1000
+    
+    w_nc_y = nc_fid.createVariable('y', 'f4', dimensions='y')
+    w_nc_y.description = "Swiss northing"
+    w_nc_y.units = "km"
+    w_nc_y[:] = yvec/1000
+    
+    w_nc_u = nc_fid.createVariable('U', 'f4', dimensions=('time', 'y', 'x'), zlib=True)
+    w_nc_u.description = "Optical flow - zonal component (West -> East)"
+    w_nc_u.units = "km/5min"
+    w_nc_u[:] = Ufields
+    
+    w_nc_v = nc_fid.createVariable('V', 'f4', dimensions=('time', 'y', 'x'), zlib=True)
+    w_nc_v.description = "Optical flow - meridional component (South -> North))"
+    w_nc_v.units = "km/5min"  
+    w_nc_v[:] = Vfields
+    
+    nc_fid.close()                   
 
 def get_file_matching_expr(inDir, fileNameWildCard):
     listFilesDir = os.listdir(inDir)

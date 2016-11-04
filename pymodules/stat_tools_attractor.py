@@ -410,7 +410,28 @@ def update_mean(data, newSample):
         return float('nan')
     else:
         return newMean
-        
+
+def wavelet_decomposition_2d(rainfield, wavelet = 'haar', nrLevels = None):
+    nrRows = rainfield.shape[0]
+    nrCols = rainfield.shape[1]
+
+    if nrLevels == None:
+        minDim = np.min([nrRows,nrRows])
+        nrLevels = int(np.log2(minDim))
+        print(nrLevels)
+    # Perform wavelet decomposition
+    w = pywt.Wavelet(wavelet)
+    
+    wavelet_coeff = []
+    for level in range(0,nrLevels):
+        # Decompose rainfield with wavelet
+        cA, (cH, cV, cD) = pywt.dwt2(rainfield, wavelet)
+        # Next rainfield to decompose is equal to the wavelet approximation
+        rainfield = cA
+        wavelet_coeff.append(rainfield)
+    
+    return(wavelet_coeff)
+    
 def generate_wavelet_noise(rainfield, wavelet='db4', nrLevels=6, level2perturb='all', nrMembers=1):
     '''
     First naive attempt to generate stochastic noise using wavelets
