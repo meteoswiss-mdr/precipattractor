@@ -23,11 +23,219 @@ import csv
 from PIL import Image
 from netCDF4 import Dataset
 
+import matplotlib.colors as colors
+
 import datetime
 from operator import itemgetter
 
 import time_tools_attractor as ti
+import data_tools_attractor as dt
+import stat_tools_attractor as st
 
+# Radar structure
+class Radar_object(object):
+    
+    # Radar stats
+    war = -1
+
+def read_gif_image(timeStartStr, product='AQC', minR = 0.08, fftDomainSize = 512, resKm = 1, timeAccumMin = 5,\
+    inBaseDir = '/scratch/lforesti/data/', noData = -999.0, cmaptype = 'MeteoSwiss', domain = 'CCS4'):
+    
+    # time parameters
+    timeAccumMinStr = '%05i' % timeAccumMin
+    timeAccum24hStr = '%05i' % (24*60)
+    
+    # Limits of spatial domain
+    if domain == 'CCS4':
+        Xmin = 255000
+        Xmax = 965000
+        Ymin = -160000
+        Ymax = 480000
+    else:
+        print('Domain not found.')
+        sys.exit(1)
+    allXcoords = np.arange(Xmin,Xmax+resKm*1000,resKm*1000)
+    allYcoords = np.arange(Ymin,Ymax+resKm*1000,resKm*1000)
+    
+    # colormap
+    color_list, clevs = dt.get_colorlist(cmaptype) 
+    clevsStr = []
+    for i in range(0,len(clevs)):
+        if (clevs[i] < 10) and (clevs[i] >= 1):
+            clevsStr.append(str('%.1f' % clevs[i]))
+        elif (clevs[i] < 1):
+            clevsStr.append(str('%.2f' % clevs[i]))
+        else:
+            clevsStr.append(str('%i' % clevs[i]))
+
+    cmap = colors.ListedColormap(color_list)
+    norm = colors.BoundaryNorm(clevs, cmap.N)
+    cmap.set_over('black',1)
+    cmapMask = colors.ListedColormap(['black'])
+    
+    # timestamp
+    timeStart = ti.timestring2datetime(timeStartStr)
+    timeLocal = timeStart
+    year, yearStr, julianDay, julianDayStr = ti.parse_datetime(timeLocal)
+    hour = timeLocal.hour
+    minute = timeLocal.minute
+
+    # Create filename for input
+    hourminStr = ('%02i' % hour) + ('%02i' % minute)
+    radarOperWildCard = '?'
+    subDir = str(year) + '/' + yearStr + julianDayStr + '/'
+    inDir = inBaseDir + subDir
+    fileNameWildCard = inDir + product + yearStr + julianDayStr + hourminStr + radarOperWildCard + '_' + timeAccumMinStr + '*.gif'
+
+    # Get filename matching regular expression
+    fileName = get_filename_matching_regexpr(fileNameWildCard)
+    
+    # Get data quality from fileName
+    dataQuality = get_quality_fromfilename(fileName)
+    
+    # Check if file exists
+    isFile = os.path.isfile(fileName)
+    if (isFile == False):
+        print('File: ', fileNameWildCard, ' not found.')
+        radar_object = Radar_object()  
+    else:
+        # Reading GIF file
+        print('Reading: ', fileName)
+        try:
+            # Open GIF image
+            rain8bit, nrRows, nrCols = open_gif_image(fileName)
+            
+            # Get GIF image metadata
+            alb, doe, mle, ppm, wei = get_gif_radar_operation(fileName)
+            
+            # If metadata are not written in gif file derive them from the quality number in the filename
+            if (alb == -1) & (doe == -1) & (mle == -1) & (ppm == -1) & (wei == -1):
+                alb, doe, mle = get_radaroperation_from_quality(dataQuality)
+
+            # Generate lookup table
+            lut = dt.get_rainfall_lookuptable(noData)
+
+            # Replace 8bit values with rain rates 
+            rainrate = lut[rain8bit]
+            
+            if (product == 'AQC'): # AQC is given in millimiters!!!
+                rainrate[rainrate != noData] = rainrate[rainrate != noData]*(60/5)
+
+            # Get coordinates of reduced domain
+            extent = dt.get_reduced_extent(rainrate.shape[1], rainrate.shape[0], fftDomainSize, fftDomainSize)
+            Xmin = allXcoords[extent[0]]
+            Ymin = allYcoords[extent[1]]
+            Xmax = allXcoords[extent[2]]
+            Ymax = allYcoords[extent[3]]
+            
+            subXcoords = np.arange(Xmin,Xmax,resKm*1000)
+            subYcoords = np.arange(Ymin,Ymax,resKm*1000)
+            
+            # Select 512x512 domain in the middle
+            rainrate = dt.extract_middle_domain(rainrate, fftDomainSize, fftDomainSize)
+            rain8bit = dt.extract_middle_domain(rain8bit, fftDomainSize, fftDomainSize)
+          
+            # Create mask radar composite
+            mask = np.ones(rainrate.shape)
+            mask[rainrate != noData] = np.nan
+            mask[rainrate == noData] = 1
+
+            # Set lowest rain thresholds
+            if (minR > 0.0) and (minR < 500.0):
+                rainThreshold = minR
+                rainThresholdWAR = minR
+                rainThresholdPlot = minR
+                rainThresholdStats = minR
+            else: # default minimum rainfall rate
+                rainThresholdWAR = 0.08
+                rainThresholdPlot = 0.08
+                rainThresholdStats = 0.08
+                
+            # Compute WAR
+            war = st.compute_war(rainrate,rainThresholdWAR, noData)
+            
+            # Set all the non-rainy pixels to NaN (for plotting)
+            rainratePlot = np.copy(rainrate)
+            condition = rainratePlot < rainThresholdPlot
+            rainratePlot[condition] = np.nan
+            
+            # Set all the data below a rainfall threshold to NaN (for conditional statistics)
+            rainrateNans = np.copy(rainrate)
+            condition = rainrateNans < rainThresholdStats
+            rainrateNans[condition] = np.nan
+            
+            # Set all the -999 to NaN (for unconditional statistics)
+            condition = rainrate < 0
+            rainrate[condition] = np.nan
+            condition = (rainrate < rainThresholdStats) & (rainrate > 0.0)
+            rainrate[condition] = 0.0
+            
+            # Compute corresponding reflectivity
+            A = 316.0
+            b = 1.5
+            
+            # Take reflectivity value corresponding to minimum rainfall threshold as zero(0.08 mm/hr)
+            zerosDBZ,_,_ = dt.rainrate2reflectivity(rainThresholdWAR, A, b)
+            #zerosDBZ = 0.0
+            
+            # Convert rainrate to reflectivity
+            dBZ, minDBZ, minRainRate = dt.rainrate2reflectivity(rainrate, A, b, zerosDBZ)
+           
+            # fills nans with zerosDBZ
+            condition = np.isnan(dBZ)
+            dBZFourier = np.copy(dBZ)
+            dBZFourier[condition] = zerosDBZ
+            
+            # fills no-rain with nans
+            condition = rainrateNans < rainThresholdStats
+            dBZNans = np.copy(dBZ)
+            dBZNans[condition] = np.nan
+            
+            ## Creates radar object
+            radar_object = Radar_object()
+            
+            # fields
+            radar_object.dBZ = dBZ
+            radar_object.dBZFourier = dBZFourier
+            radar_object.dBZNans = dBZNans
+            radar_object.rain8bit = rain8bit
+            radar_object.rainrate = rainrate
+            radar_object.rainrateNans = rainrateNans
+            radar_object.rainratePlot = rainratePlot
+            radar_object.mask = mask
+            
+            # statistics
+            radar_object.war = war
+            
+            # metadata
+            radar_object.datetime = timeStart
+            radar_object.hourminStr = hourminStr
+            radar_object.fileName = fileName
+            radar_object.zerosDBZ = zerosDBZ
+            radar_object.rainThreshold = rainThreshold
+            radar_object.alb = alb
+            radar_object.doe = doe
+            radar_object.mle = mle
+            radar_object.ppm = ppm
+            radar_object.wei = wei
+            radar_object.extent = (Xmin, Xmax, Ymin, Ymax)
+            radar_object.subXcoords = subXcoords
+            radar_object.subYcoords = subYcoords
+            radar_object.fftDomainSize = fftDomainSize
+            
+            # colormaps
+            radar_object.cmap = cmap
+            radar_object.norm = norm
+            radar_object.clevs = clevs
+            radar_object.clevsStr = clevsStr
+            radar_object.cmapMask = cmapMask
+
+        except IOError:
+            print('File ', fileName, ' not readable')
+            radar_object = Radar_object()
+            
+    return(radar_object)    
+    
 def get_filename_stats(inBaseDir, analysisType, timeDate, product='AQC', timeAccumMin=5, quality=0, minR=0.08,  wols=0, variableBreak = 0, format='netcdf'):
     if format == 'netcdf':
         extension = '.nc'
@@ -357,7 +565,7 @@ def read_netcdf_globalstats(fileName, variableNames = None):
  
 def write_netcdf_flow(fileName, timeStamps, xvec, yvec, Ufields, Vfields, noData=-999.0):
     '''
-    Function to write out one flow field to netCDF file
+    Function to write out one or several flow fields to netCDF file
     '''
     if type(timeStamps) is not list:
         if type(timeStamps) is np.ndarray:
@@ -410,6 +618,73 @@ def write_netcdf_flow(fileName, timeStamps, xvec, yvec, Ufields, Vfields, noData
     
     nc_fid.close()                   
 
+def write_netcdf_waveletcoeffs(fileName, timeStamps, originalImageShape, \
+    xvecs, yvecs, waveletCoeffs, waveletType = 'none', noData=-999.0):
+    '''
+    Function to write out one field of wavelet coefficients to netCDF file
+    '''
+    if type(timeStamps) is not list:
+        if type(timeStamps) is np.ndarray:
+            timeStamps = timeStamps.tolist()
+        else:
+            timeStamps = [timeStamps]
+    
+    # Create netCDF Dataset
+    nc_fid = Dataset(fileName, 'w', format='NETCDF4')
+    nc_fid.title = 'Wavelet coefficients of rainfall field'
+    nc_fid.institution = 'MeteoSwiss, Locarno-Monti'
+    nc_fid.description = waveletType + " wavelet"
+    nc_fid.comment = 'File generated the ' + str(datetime.datetime.now()) + '.'
+    nc_fid.noData = noData
+    
+    # Time dimension
+    nrSamples = len(timeStamps)
+    nc_fid.createDimension('time', nrSamples) # Much larger file if putting 'None' (unlimited size) 
+    nc_time = nc_fid.createVariable('time', 'i8', dimensions=('time'))
+    nc_time.description = "Timestamp (UTC)"
+    nc_time.units = "%YYYY%MM%DD%HH%mm%SS"
+    nc_time[:] = timeStamps
+    
+    # Generate groups to store the wavelet coefficients at different scales (x,y,wc)
+    for scale in range(0,len(waveletCoeffs)):
+        # Get data at particular scale
+        scalegrp = nc_fid.createGroup("wc_scale" + str(scale))
+        xvec = xvecs[scale]
+        yvec = yvecs[scale]
+        waveletCoeffScale = np.array(waveletCoeffs[scale])
+        
+        # Spatial dimension
+        dimNames = ['x','y']
+        dimensions = [int(xvec.shape[0]),int(yvec.shape[0])]
+        for i in range(len(dimensions)):
+            scalegrp.createDimension(dimNames[i],dimensions[i])
+        
+        # Write out coordinates
+        w_nc_x = scalegrp.createVariable('x', 'f4', dimensions='x')
+        w_nc_x.description = "Swiss easting"
+        w_nc_x.units = "km"
+        w_nc_x[:] = xvec/1000
+        
+        w_nc_y = scalegrp.createVariable('y', 'f4', dimensions='y')
+        w_nc_y.description = "Swiss northing"
+        w_nc_y.units = "km"
+        w_nc_y[:] = yvec/1000
+        
+        # Write out wavelet coefficients
+        varName = 'wc' + str(scale)
+        if scale != len(waveletCoeffs)-1:
+            scaleKm = int((xvec[1] - xvec[0])/1000)
+        else:
+            previousScaleKm = xvecs[scale-1][1] - xvecs[scale-1][0]
+            scaleKm = int(previousScaleKm*2/1000)
+        
+        w_nc_u = scalegrp.createVariable(varName, 'f4', dimensions=('time', 'y', 'x'), zlib=True)
+        w_nc_u.description = "Wavelet coefficients at scale " + str(scaleKm) + ' km'
+        w_nc_u.units = "amplitude"
+        w_nc_u[:] = waveletCoeffScale
+    
+    nc_fid.close()        
+    
 def get_file_matching_expr(inDir, fileNameWildCard):
     listFilesDir = os.listdir(inDir)
     boolFound = False

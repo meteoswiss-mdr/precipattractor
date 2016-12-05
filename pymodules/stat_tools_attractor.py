@@ -431,6 +431,24 @@ def wavelet_decomposition_2d(rainfield, wavelet = 'haar', nrLevels = None):
         wavelet_coeff.append(rainfield)
     
     return(wavelet_coeff)
+
+def generate_wavelet_coordinates(wavelet_coeff, originalImageShape, Xmin, Xmax, Ymin, Ymax, gridSpacing):
+    
+    nrScales = len(wavelet_coeff)
+    # Generate coordinates of centers of wavelet coefficients
+    xvecs = []
+    yvecs = []
+    for scale in range(0,nrScales):
+        wc_fieldsize = np.array(wavelet_coeff[scale].shape)
+        wc_boxsize = np.array(originalImageShape)/wc_fieldsize*gridSpacing
+        gridX = np.arange(Xmin + wc_boxsize[1]/2,Xmax,wc_boxsize[1])
+        gridY = np.flipud(np.arange(Ymin + wc_boxsize[0]/2,Ymax,wc_boxsize[0]))
+        # print(wc_fieldsize, wc_boxsize)
+        # print(Xmin, Xmax, gridX, gridY)
+        xvecs.append(gridX)
+        yvecs.append(gridY)
+    
+    return(xvecs, yvecs)
     
 def generate_wavelet_noise(rainfield, wavelet='db4', nrLevels=6, level2perturb='all', nrMembers=1):
     '''
