@@ -143,31 +143,21 @@ def read_gif_image(timeStartStr, product='AQC', minR = 0.08, fftDomainSize = 512
             # Set lowest rain thresholds
             if (minR > 0.0) and (minR < 500.0):
                 rainThreshold = minR
-                rainThresholdWAR = minR
-                rainThresholdPlot = minR
-                rainThresholdStats = minR
             else: # default minimum rainfall rate
-                rainThresholdWAR = 0.08
-                rainThresholdPlot = 0.08
-                rainThresholdStats = 0.08
+                rainThreshold = 0.08
                 
             # Compute WAR
-            war = st.compute_war(rainrate,rainThresholdWAR, noData)
+            war = st.compute_war(rainrate,rainThreshold, noData)
             
-            # Set all the non-rainy pixels to NaN (for plotting)
-            rainratePlot = np.copy(rainrate)
-            condition = rainratePlot < rainThresholdPlot
-            rainratePlot[condition] = np.nan
-            
-            # Set all the data below a rainfall threshold to NaN (for conditional statistics)
+            # fills no-rain with nans (for conditional statistics)
             rainrateNans = np.copy(rainrate)
-            condition = rainrateNans < rainThresholdStats
+            condition = rainrateNans < rainThreshold
             rainrateNans[condition] = np.nan
             
-            # Set all the -999 to NaN (for unconditional statistics)
+            # fills no-rain with zeros and missing data with nans (for unconditional statistics)
             condition = rainrate < 0
             rainrate[condition] = np.nan
-            condition = (rainrate < rainThresholdStats) & (rainrate > 0.0)
+            condition = (rainrate < rainThreshold) & (rainrate > 0.0)
             rainrate[condition] = 0.0
             
             # Compute corresponding reflectivity
@@ -175,19 +165,19 @@ def read_gif_image(timeStartStr, product='AQC', minR = 0.08, fftDomainSize = 512
             b = 1.5
             
             # Take reflectivity value corresponding to minimum rainfall threshold as zero(0.08 mm/hr)
-            zerosDBZ,_,_ = dt.rainrate2reflectivity(rainThresholdWAR, A, b)
-            #zerosDBZ = 0.0
+            dbzThreshold,_,_ = dt.rainrate2reflectivity(rainThreshold, A, b)
             
-            # Convert rainrate to reflectivity
-            dBZ, minDBZ, minRainRate = dt.rainrate2reflectivity(rainrate, A, b, zerosDBZ)
+            # Convert rainrate to reflectivity, no-rain are set to zero (for unconditional statistics)
+            dBZ, minDBZ, minRainRate = dt.rainrate2reflectivity(rainrate, A, b, 0.0)
            
-            # fills nans with zerosDBZ
-            condition = np.isnan(dBZ)
+            # fills nans with dbzThreshold for Fourier analysis
+            condition1 = np.isnan(dBZ) 
+            condition2 = dBZ < dbzThreshold
             dBZFourier = np.copy(dBZ)
-            dBZFourier[condition] = zerosDBZ
+            dBZFourier[(condition1 == True) | (condition2 == True)] = dbzThreshold
             
-            # fills no-rain with nans
-            condition = rainrateNans < rainThresholdStats
+            # fills no-rain and missing data with nans (for conditional statistics)
+            condition = rainrateNans < rainThreshold
             dBZNans = np.copy(dBZ)
             dBZNans[condition] = np.nan
             
@@ -201,23 +191,30 @@ def read_gif_image(timeStartStr, product='AQC', minR = 0.08, fftDomainSize = 512
             radar_object.rain8bit = rain8bit
             radar_object.rainrate = rainrate
             radar_object.rainrateNans = rainrateNans
-            radar_object.rainratePlot = rainratePlot
             radar_object.mask = mask
             
             # statistics
             radar_object.war = war
             
-            # metadata
+            # time stamps
             radar_object.datetime = timeStart
+            radar_object.datetimeStr = timeStartStr
             radar_object.hourminStr = hourminStr
+            radar_object.yearStr = yearStr
+            radar_object.julianDayStr = julianDayStr
+            
+            # metadata
             radar_object.fileName = fileName
-            radar_object.zerosDBZ = zerosDBZ
+            radar_object.dbzThreshold = dbzThreshold
             radar_object.rainThreshold = rainThreshold
             radar_object.alb = alb
             radar_object.doe = doe
             radar_object.mle = mle
             radar_object.ppm = ppm
             radar_object.wei = wei
+            radar_object.dataQuality = dataQuality
+            
+            # Location
             radar_object.extent = (Xmin, Xmax, Ymin, Ymax)
             radar_object.subXcoords = subXcoords
             radar_object.subYcoords = subYcoords
@@ -618,7 +615,7 @@ def write_netcdf_flow(fileName, timeStamps, xvec, yvec, Ufields, Vfields, noData
     
     nc_fid.close()                   
 
-def write_netcdf_waveletcoeffs(fileName, timeStamps, originalImageShape, \
+def write_netcdf_waveletcoeffs(fileName, timeStamps, \
     xvecs, yvecs, waveletCoeffs, waveletType = 'none', noData=-999.0):
     '''
     Function to write out one field of wavelet coefficients to netCDF file
@@ -652,7 +649,6 @@ def write_netcdf_waveletcoeffs(fileName, timeStamps, originalImageShape, \
         xvec = xvecs[scale]
         yvec = yvecs[scale]
         waveletCoeffScale = np.array(waveletCoeffs[scale])
-        
         # Spatial dimension
         dimNames = ['x','y']
         dimensions = [int(xvec.shape[0]),int(yvec.shape[0])]
@@ -684,6 +680,60 @@ def write_netcdf_waveletcoeffs(fileName, timeStamps, originalImageShape, \
         w_nc_u[:] = waveletCoeffScale
     
     nc_fid.close()        
+
+def write_netcdf_waveletscale(fileName, timeStamps, \
+    xvec, yvec, waveletCoeffs, scaleKM, waveletType = 'none', noData=-999.0):
+    '''
+    Function to write out multiple fields of wavelet coefficients at ONE SELECTED SCALE to netCDF file
+    '''
+    if type(timeStamps) is not list:
+        if type(timeStamps) is np.ndarray:
+            timeStamps = timeStamps.tolist()
+        else:
+            timeStamps = [timeStamps]
+    
+    # Create netCDF Dataset
+    nc_fid = Dataset(fileName, 'w', format='NETCDF4')
+    nc_fid.title = 'Wavelet coefficients of rainfall field'
+    nc_fid.institution = 'MeteoSwiss, Locarno-Monti'
+    nc_fid.description = waveletType + " wavelet"
+    nc_fid.comment = 'File generated the ' + str(datetime.datetime.now()) + '.'
+    nc_fid.noData = noData
+    
+    # Time dimension
+    nrSamples = len(timeStamps)
+    nc_fid.createDimension('time', nrSamples) # Much larger file if putting 'None' (unlimited size) 
+    nc_time = nc_fid.createVariable('time', 'i8', dimensions=('time'))
+    nc_time.description = "Timestamp (UTC)"
+    nc_time.units = "%YYYY%MM%DD%HH%mm%SS"
+    nc_time[:] = timeStamps
+    print(xvec,yvec)
+    # Spatial dimension
+    dimNames = ['x','y']
+    dimensions = [int(len(xvec)),int(len(yvec))]
+    for i in range(len(dimensions)):
+        nc_fid.createDimension(dimNames[i],dimensions[i])
+    
+    # Write out coordinates
+    w_nc_x = nc_fid.createVariable('x', 'f4', dimensions='x')
+    w_nc_x.description = "Swiss easting"
+    w_nc_x.units = "km"
+    w_nc_x[:] = xvec/1000
+    
+    w_nc_y = nc_fid.createVariable('y', 'f4', dimensions='y')
+    w_nc_y.description = "Swiss northing"
+    w_nc_y.units = "km"
+    w_nc_y[:] = yvec/1000
+    
+    # Write out wavelet coefficients
+    varName = 'wc'
+    
+    w_nc_u = nc_fid.createVariable(varName, 'f4', dimensions=('time', 'y', 'x'), zlib=True)
+    w_nc_u.description = "Wavelet coefficients at scale " + str(scaleKM) + ' km'
+    w_nc_u.units = "amplitude"
+    w_nc_u[:] = waveletCoeffs
+    
+    nc_fid.close()
     
 def get_file_matching_expr(inDir, fileNameWildCard):
     listFilesDir = os.listdir(inDir)
