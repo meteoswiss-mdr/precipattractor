@@ -262,3 +262,13 @@ def datetime2absolutetime(timeDate):
 def absolutetime2datetime(absTime):
     timeDate = datetime.datetime(1970,1,1) + datetime.timedelta(seconds = absTime)
     return(timeDate)
+
+def tic():
+    global _start_time 
+    _start_time = time.time()
+
+def toc(appendText):
+    t_sec = round(time.time() - _start_time)
+    (t_min, t_sec) = divmod(t_sec,60)
+    (t_hour,t_min) = divmod(t_min,60) 
+    print('Time passed: {}h:{}m:{}s'.format(t_hour,t_min,t_sec), appendText)

@@ -328,7 +328,6 @@ def smooth_extrapolate_velocity_field(u, v, prvs, next, sigma):
     trainingV = trainingV[trainingV == -999]
     
     from scipy.interpolate import Rbf
-    print(trainingX.shape)
     rbfi = Rbf(trainingX, trainingY, trainingU, epsilon = 10)
     uvec = rbfi(allCoords[:,0], allCoords[:,1])
     
@@ -339,7 +338,6 @@ def smooth_extrapolate_velocity_field(u, v, prvs, next, sigma):
     vgrid = vvec.reshape(nrRows,nrCols)
     
     flow = np.dstack((ugrid,vgrid))
-    print(flow.shape)
 
 #### Methods to compute the anisotropy ####
 def generate_data():
@@ -418,7 +416,6 @@ def wavelet_decomposition_2d(rainfield, wavelet = 'haar', nrLevels = None):
     if nrLevels == None:
         minDim = np.min([nrRows,nrRows])
         nrLevels = int(np.log2(minDim))
-        print(nrLevels)
     # Perform wavelet decomposition
     w = pywt.Wavelet(wavelet)
     
@@ -427,7 +424,7 @@ def wavelet_decomposition_2d(rainfield, wavelet = 'haar', nrLevels = None):
         # Decompose rainfield with wavelet
         cA, (cH, cV, cD) = pywt.dwt2(rainfield, wavelet)
         # Next rainfield to decompose is equal to the wavelet approximation
-        rainfield = cA
+        rainfield = cA/2.0
         wavelet_coeff.append(rainfield)
     
     return(wavelet_coeff)
@@ -516,10 +513,33 @@ def generate_wavelet_noise(rainfield, wavelet='db4', nrLevels=6, level2perturb='
         stochasticEnsemble.append(stochasticRain)
     
     return stochasticEnsemble
+
+def get_level_from_scale(resKM, scaleKM):
+    if resKM == scaleKM:
+        print('scaleKM should be larger than resKM in st.get_level_from_scale')
+        sys.exit()
+    elif isPower(scaleKM, resKM*2) == False:
+        print('scaleKM should be a power of 2 in st.get_level_from_scale')
+        sys.exit()
+        
+    for t in range(0,50):
+        resKM = resKM*2
+        if resKM == scaleKM:
+            level = t
+    return(level)
+
+def isPower(n, base):
+    return base**int(math.log(n, base)+.5)==n
+
     
-def to_zscores(data):
-    mean = np.nanmean(data)
-    stdev = np.nanstd(data)
+def to_zscores(data, axis=None):
+
+    if axis is None:
+        mean = np.nanmean(data)
+        stdev = np.nanstd(data)    
+    else:
+        mean = np.nanmean(data, axis=axis)
+        stdev = np.nanstd(data, axis=axis)
     
     zscores = (data - mean)/stdev
     
