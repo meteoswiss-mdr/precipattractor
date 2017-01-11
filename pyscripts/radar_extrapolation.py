@@ -251,18 +251,18 @@ for i in range(nStacks-1,-1*net-1,-1):
                 next = np.ndarray.astype(next,'uint8') 
                 
                 # (1a) features to track by threshold (cells)
-                maxCorners = 200
-                p0, nCorners = of.threshold_features_to_track(prvs, maxCorners, minThr = rainThreshold, blockSize = 35)
+                # maxCorners = 200
+                # p0, nCorners = of.threshold_features_to_track(prvs, maxCorners, minThr = rainThreshold, blockSize = 35)
                 
                 # (1b) Shi-Tomasi good features to track
-                # maxCorners = 100
-                # p0b, nCorners = of.ShiTomasi_features_to_track(prvs, maxCorners, qualityLevel=0.2, minDistance=15, blockSize=5)   
+                maxCorners = 1000
+                p0, nCorners = of.ShiTomasi_features_to_track(prvs, maxCorners, qualityLevel=0.05, minDistance=15, blockSize=5)   
                 
                 # use both
                 # p0 = np.vstack((p0a,p0b))
 
                 # (2) Lucas-Kande tracking
-                x, y, u, v, err = of.LucasKanade_features_tracking(prvs, next, p0, winSize=(30,30), maxLevel=3)
+                x, y, u, v, err = of.LucasKanade_features_tracking(prvs, next, p0, winSize=(50,50), maxLevel=3)
                 
                 # (3) exclude some unrealistic vectors 
                 maxspeed = 100/12 # km/5min
@@ -408,7 +408,22 @@ try:
             plt.imshow(edgedStack[it],cmap='Greys_r',interpolation='nearest')
             plt.grid()
             plt.title(titleStr)
-            plt.pause(frameRate)    
-            
+            saveplots=1
+            if saveplots:
+                figname = "tmp/frame_" + str(it).zfill(2) + ".png"
+                plt.savefig(figname)
+                print(figname + ' saved.')
+                if it == range(nt)[-1]:
+                    print('Generating the animation...')
+                    delay = 50
+                    dpi = 100
+                    outDir = 'tmp/'
+                    stringGifName = timeStartStr + '_' + str(leadtime) + 'min.gif'
+                    cmd = 'convert -delay ' + str(delay) + ' -loop 0 ' + outDir + '/*.png ' + stringGifName
+                    os.system(cmd)
+                    print(stringGifName, ' saved.')
+                    sys.exit()
+            else:
+                plt.pause(frameRate)  
 except KeyboardInterrupt:
     pass
