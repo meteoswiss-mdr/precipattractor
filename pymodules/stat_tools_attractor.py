@@ -447,7 +447,7 @@ def time_delay_embedding(timeSeries, nrSteps=1, stepSize=1, noData=np.nan):
     
     return(delayedArray)
         
-def correlation_dimension(dataArray, nrSteps=100, plot=False):
+def correlation_dimension(dataArray, nrSteps=100, Lnorm=2, plot=False):
     '''
     Function to estimate the correlation dimension
     '''
@@ -456,7 +456,7 @@ def correlation_dimension(dataArray, nrSteps=100, plot=False):
     
     # Compute the L_p norm between all pairs of points in the high dimensional space
     # Correlation dimension requires the computation of the L1 norm (p=1), i.e. |Xi-Xj|
-    lp_distances = dist.squareform(dist.pdist(dataArray, p=1))
+    lp_distances = dist.squareform(dist.pdist(dataArray, p=Lnorm))
     #lp_distances = dist.pdist(dataArray, p=1) # Which one appropriate? It gives different fractal dims...
     
     # Normalize distances by their st. dev.?
@@ -478,7 +478,7 @@ def correlation_dimension(dataArray, nrSteps=100, plot=False):
     
     Cr = []
     for r in radii:
-        s = 1.0 / (nr_samples * (nr_samples-1)) * np.sum(lp_distances < r) # fraction
+        s = 1.0 / (nr_samples * (nr_samples-1)) * np.sum(lp_distances <= r) # fraction
         #s = np.sum(lp_distances < r)/2 # count
         Cr.append(s)
     Cr = np.array(Cr)
