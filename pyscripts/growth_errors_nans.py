@@ -472,7 +472,7 @@ for variable in range(0, len(varNames)): ## LOOP OVER VARIABLES
                 sequenceData[:,variable] = np.nan
             #else:
                 # Replace data from first bad increment till the end with NaNs
-                #sequenceData[idxFirsBadIncrement:-1,variable] = np.nan
+                #sequenceData[idxFirsBadIncrement:,variable] = np.nan
             
             # Check the continuity of time stamps (no holes)
             timeDiffMin = np.array(np.diff(sequenceTimes)/60, dtype=int)

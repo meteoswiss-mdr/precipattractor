@@ -164,18 +164,40 @@ def extract_middle_domain(rainfield, domainSizeX, domainSizeY):
     
     return(rainfieldDomain)
 
-def get_colorlist(type):
+def get_colorlist(type='MeteoSwiss', units='R'):
     if type == 'STEPS':
         color_list = ['cyan','deepskyblue','dodgerblue','blue','chartreuse','limegreen','green','darkgreen','yellow','gold','orange','red','magenta','darkmagenta']
-        clevs = [0.1,0.25,0.4,0.63,1,1.6,2.5,4,6.3,10,16,25,40,63,100]
+        if units == 'R':
+            clevs = [0.1,0.25,0.4,0.63,1,1.6,2.5,4,6.3,10,16,25,40,63,100]
+        elif units == 'dBZ':
+            clevs = np.arange(-10,70,5)
+        else:
+            print('Wrong units in get_colorlist')
+            sys.exit(1)
     if type == 'MeteoSwiss':
         pinkHex = '#%02x%02x%02x' % (232, 215, 242)
         redgreyHex = '#%02x%02x%02x' % (156, 126, 148)
         color_list = [pinkHex, redgreyHex, "#640064","#AF00AF","#DC00DC","#3232C8","#0064FF","#009696","#00C832",
         "#64FF00","#96FF00","#C8FF00","#FFFF00","#FFC800","#FFA000","#FF7D00","#E11900"] # light gray "#D3D3D3"
-        clevs= [0,0.08,0.16,0.25,0.40,0.63,1,1.6,2.5,4,6.3,10,16,25,40,63,100,160]
+        if units == 'R':
+            clevs= [0,0.08,0.16,0.25,0.40,0.63,1,1.6,2.5,4,6.3,10,16,25,40,63,100,160]
+        elif units == 'dBZ':
+            clevs = np.arange(-10,70,5)
+        else:
+            print('Wrong units in get_colorlist')
+            sys.exit(1)
+    
+    # Color level strings    
+    clevsStr = []
+    for i in range(0,len(clevs)):
+        if (clevs[i] < 10) and (clevs[i] >= 1):
+            clevsStr.append(str('%.1f' % clevs[i]))
+        elif (clevs[i] < 1):
+            clevsStr.append(str('%.2f' % clevs[i]))
+        else:
+            clevsStr.append(str('%i' % clevs[i]))
         
-    return(color_list, clevs)
+    return(color_list, clevs, clevsStr)
 
 def dynamic_formatting_floats(floatArray):
     if type(floatArray) == list:

@@ -272,3 +272,32 @@ def toc(appendText):
     (t_min, t_sec) = divmod(t_sec,60)
     (t_hour,t_min) = divmod(t_min,60) 
     print('Time passed: {}h:{}m:{}s'.format(t_hour,t_min,t_sec), appendText)
+    
+def sample_independent_times(timeStampsDt, indepTimeHours=6, method='start'):
+    if len(timeStampsDt) <= 1:
+        return(timeStampsDt,[0])
+    
+    timeDiffs = np.diff(datetime2absolutetime(timeStampsDt))
+    timeDiffs = np.hstack((timeDiffs[0], timeDiffs))
+    
+    indepTimeSecs = indepTimeHours*60*60
+    #print(timeStampsDt.shape, timeDiffs)
+    
+    if method == 'start':
+        timeDiffsAccum = 0
+        indepIndices = []
+        for i in range(0,len(timeStampsDt)):
+            if (i == 0) | (timeDiffs[i] >= indepTimeSecs) | (timeDiffsAccum >= indepTimeSecs):
+                indepIndices.append(i)
+                timeDiffsAccum = 0
+            else:
+                # Increment the accumulated time difference to avoid excluding the next sample 
+                # if closer than X hours from the previous (if not included), 
+                # but further than X hours than the one before the previous
+                timeDiffsAccum = timeDiffsAccum + timeDiffs[i]
+
+    indepIndices = np.array(indepIndices) 
+    indepTimeStampsDt = timeStampsDt[indepIndices]
+    #print(indepTimeStampsDt, indepIndices)
+    
+    return(indepTimeStampsDt, indepIndices)

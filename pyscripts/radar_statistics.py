@@ -8,7 +8,7 @@ import argparse
 from PIL import Image
 
 import matplotlib as mpl
-mpl.use('Agg')
+#mpl.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -22,8 +22,8 @@ import warnings
 from collections import OrderedDict
 
 import pyfftw
-from scipy import fftpack,stats
-import scipy.signal as ss
+from scipy import stats
+
 import scipy.ndimage as ndimage
 import pywt
 from pyearth import Earth
@@ -40,7 +40,6 @@ import stat_tools_attractor as st
 import optical_flow as of
 import maple_ree
 
-import radialprofile
 import gis_base as gis
     
 ################
@@ -72,7 +71,7 @@ parser.add_argument('-start', default='201601310600', type=str,help='Starting da
 parser.add_argument('-end', default='201601310600', type=str,help='Ending date YYYYMMDDHHmmSS.')
 parser.add_argument('-product', default='AQC', type=str,help='Which radar rainfall product to use (AQC, CPC, etc).')
 parser.add_argument('-plot', default=0, type=int,help='Whether to plot the rainfall fields and the power spectra.')
-parser.add_argument('-plt', default='1d', type=str,help='Type of plot on the side of the precipitation field (1d, 2d, 1dnoise, 2dnoise or noise field).')
+parser.add_argument('-analysis', nargs='+', default=['autocorr', 'of'], type=str,help='Type of analysis to do (1d, 2d, of, autocorr, wavelets, 1dnoise, 2dnoise).')
 parser.add_argument('-wols', default=0, type=int,help='Whether to use the weighted ordinary leas squares or not in the fitting of the power spectrum.')
 parser.add_argument('-minR', default=0.08, type=float,help='Minimum rainfall rate for computation of WAR and various statistics.')
 parser.add_argument('-format', default="netcdf", type=str,help='File format for output statistics (netcdf or csv).')
@@ -87,7 +86,11 @@ boolPlotting = args.plot
 product = args.product
 weightedOLS = args.wols
 timeAccumMin = args.accum
-plotSpectrum = args.plt
+analysis = args.analysis
+
+if set(analysis).issubset(['1d', '2d', 'of', 'autocorr', 'wavelets', '1dnoise', '2dnoise']) == False:
+   print('You have to ask for a valid analysis [1d, 2d, of, autocorr, wavelets, 1dnoise, 2dnoise]')
+   sys.exit(1)
 
 if type(scalingBreakArray_KM) != list and type(scalingBreakArray_KM) != np.ndarray:
     scalingBreakArray_KM = [scalingBreakArray_KM]
@@ -141,16 +144,7 @@ timeAccumMinStr = '%05i' % timeAccumMin
 timeAccum24hStr = '%05i' % (24*60)
 
 ## COLORMAPS
-color_list, clevs = dt.get_colorlist('MeteoSwiss') #'STEPS' or 'MeteoSwiss'
-clevsStr = []
-for i in range(0,len(clevs)):
-    if (clevs[i] < 10) and (clevs[i] >= 1):
-        clevsStr.append(str('%.1f' % clevs[i]))
-    elif (clevs[i] < 1):
-        clevsStr.append(str('%.2f' % clevs[i]))
-    else:
-        clevsStr.append(str('%i' % clevs[i]))
-
+color_list, clevs, clevsStr = dt.get_colorlist('MeteoSwiss') #'STEPS' or 'MeteoSwiss'
 cmap = colors.ListedColormap(color_list)
 norm = colors.BoundaryNorm(clevs, cmap.N)
 cmap.set_over('black',1)
@@ -211,6 +205,9 @@ dailyU = []
 dailyV = []
 dailyTimesUV = []
 
+dailyWavelets = []
+dailyTimesWavelets = []
+
 tic = time.clock()
 
 timeLocal = timeStart
@@ -219,9 +216,10 @@ while timeLocal <= timeEnd:
     
     # Read in radar image into object
     timeLocalStr = ti.datetime2timestring(timeLocal)
-    r = io.read_gif_image(timeLocalStr, product='AQC', minR = 0.08, fftDomainSize = 512, \
+    r = io.read_gif_image(timeLocalStr, product='AQC', minR = args.minR, fftDomainSize = 512, \
     resKm = 1, timeAccumMin = 5, inBaseDir = '/scratch/lforesti/data/', noData = -999.0, cmaptype = 'MeteoSwiss', domain = 'CCS4')
     
+    hourminStr = ti.get_HHmm_str(timeLocal.hour, timeLocal.minute) # Used to write out data also when there is no valid radar file
     minWAR = 0.1
     if r.war >= minWAR:
         
@@ -242,7 +240,7 @@ while timeLocal <= timeEnd:
         ########### Compute velocity field ##############
         # It will be used to estimate the Lagrangian auto-correlation
         
-        if (nrValidFields >= 2):
+        if (nrValidFields >= 2) and ('of' in analysis):
             print('\t')
             ticOF = time.clock()
             # extract consecutive images
@@ -383,82 +381,83 @@ while timeLocal <= timeEnd:
             print('\t')
             
         ########### Compute Wavelet transform ###########
-        if plotSpectrum == 'wavelets':
+        if 'wavelets' in analysis:
             wavelet = 'haar'
             w = pywt.Wavelet(wavelet)
-            print(w)
+            #print(w)
             
             wavelet_coeff = st.wavelet_decomposition_2d(r.dBZFourier, wavelet, nrLevels = None)
-            
-            # Kepp only large scales 
-            wavelet_coeff = wavelet_coeff[1:-1]
             
             # Generate coordinates of centers of wavelet coefficients
             xvecs, yvecs = st.generate_wavelet_coordinates(wavelet_coeff, r.dBZFourier.shape, Xmin, Xmax, Ymin, Ymax, resKm*1000)
             
-            # Write out wavelet coefficients to netCDF file
-            analysisType = 'WAVELET'
-            fileNameWavelet,_,_ = io.get_filename_stats(inBaseDir, analysisType, timeLocal, product, \
-            timeAccumMin=timeAccumMin, quality=0, format='netcdf')
+            # Append a given wavelet scale to write out into daily netCDF files
+            scaleKm_asked = 8
+            scale2keep = st.get_level_from_scale(resKm, scaleKm_asked)
+
+            scaleKm = xvecs[scale2keep][1] - xvecs[scale2keep][0]
+            scaleKm = int(scaleKm/1000)
+            if scaleKm_asked != scaleKm:
+                print('Asked and returned wavelet scales not matching.', scaleKm_asked, 'vs', scaleKm)
+                sys.exit()
+            else:
+                print('Wavelet scale = ', scaleKm, 'km')
             
-            print(r.dBZFourier.shape)
-            io.write_netcdf_waveletcoeffs(fileNameWavelet, timeLocalStr, r.dBZFourier.shape, \
-            xvecs, yvecs, wavelet_coeff, waveletType = wavelet)
-            print('Saved:', fileNameWavelet)
+            dailyWavelets.append(wavelet_coeff[scale2keep])
+            dailyTimesWavelets.append(timeLocalStr)
+            
+            # # Write out wavelet coefficients to netCDF file
+            # # Keep only large scales (smaller file size) 
+            # wavelet_coeff_image = wavelet_coeff[1:]
+            
+            # analysisType = 'WAVELET'
+            # fileNameWavelet,_,_ = io.get_filename_stats(inBaseDir, analysisType, timeLocal, product, \
+            # timeAccumMin=timeAccumMin, quality=0, format='netcdf')
+            
+            # io.write_netcdf_waveletcoeffs(fileNameWavelet, timeLocalStr, \
+            # xvecs, yvecs, wavelet_coeff_image, waveletType = wavelet)
+            # print('Saved:', fileNameWavelet)
             
             ## Add wavelet coeffs to the stack
             for s in range(0, len(waveletStack)-1):
                 waveletStack[s+1] = waveletStack[s]
             waveletStack[0] = wavelet_coeff
             
-            # # Full wavelet decomposition to get also the residual components 
-            # nrLevels = 6
-            # coeffs = pywt.wavedec2(rainfieldZeros, w, level=nrLevels)
-            # #cA2, (cH2, cV2, cD2), (cH1, cV1, cD1) = coeffs
-            # cA2 = coeffs[0]
+            # # Full wavelet decomposition to get also the HDV residual components
+            waveletHVD = False
+            nrLevels = 6
+            if waveletHVD:
+                coeffs = pywt.wavedec2(r.dBZFourier, w, level=nrLevels)
+                #cA2, (cH2, cV2, cD2), (cH1, cV1, cD1) = coeffs
+                cA2 = coeffs[0]
             
             # ###### Use wavelets to generate a field of correlated noise
-            # # Generate white noise at a given level
-            # level2perturb = [3,4,5]
-            # nrMembers = 3
-            # stochasticEnsemble = st.generate_wavelet_noise(rainfieldZeros, w, nrLevels, level2perturb, nrMembers)
+            waveletNoise = False
+            level2perturb = [3,4,5]
+            nrMembers = 3
+            if waveletNoise:
+                # Generate white noise at a given level
+                stochasticEnsemble = st.generate_wavelet_noise(r.dBZFourier, w, nrLevels, level2perturb, nrMembers)
         
         ########### Compute Fourier power spectrum ###########
         ticFFT = time.clock()
         
-        # Generate a window function
-        if windowFunction == 'blackman':
-            w = ss.blackman(r.fftDomainSize)
-            window = np.outer(w,w)
-        else:
-            window = np.ones((r.fftDomainSize,r.fftDomainSize))
-
-        # Compute FFT
-        if FFTmod == 'NUMPY':
-            fprecipNoShift = np.fft.fft2(r.dBZFourier*window) # Numpy implementation
-        if FFTmod == 'FFTW':
-            fprecipNoShift = pyfftw.interfaces.numpy_fft.fft2(r.dBZFourier*window) # FFTW implementation
-            # Turn on the cache for optimum performance
-            pyfftw.interfaces.cache.enable()
-        
-        # Shift frequencies
-        fprecip = np.fft.fftshift(fprecipNoShift)
+        minFieldSize = np.min(fftDomainSize)
         
         # Compute 2D power spectrum
-        psd2d = np.abs(fprecip)**2/(r.fftDomainSize*r.fftDomainSize)
-        psd2dNoShift = np.abs(fprecipNoShift)**2/(r.fftDomainSize*r.fftDomainSize)
+        psd2d, freqAll = st.compute_2d_spectrum(r.dBZFourier, resolution=resKm, window=None, FFTmod='NUMPY')
         
         # Compute autocorrelation using inverse FFT of spectrum
-        if (plotSpectrum == 'autocorr') or (plotSpectrum == '1d') or (plotSpectrum == '2d+autocorr') or (plotSpectrum == 'wavelets'):
+        if ('autocorr' in analysis) or ('1d' in analysis) or ('2d+autocorr' in analysis) or ('wavelets' in analysis):
             # Compute autocorrelation
-            autocorr,_ = st.compute_autocorrelation_fft(r.dBZFourier*window, FFTmod = 'NUMPY')
+            autocorr,_ = st.compute_autocorrelation_fft2(r.dBZFourier, FFTmod = 'NUMPY')
             
             # Compute anisotropy from autocorrelation function
             autocorrSizeSub = 255
             percentileZero = 90
             autocorrSub, eccentricity_autocorr, orientation_autocorr, xbar_autocorr, ybar_autocorr, eigvals_autocorr, eigvecs_autocorr, percZero_autocorr,_ = st.compute_fft_anisotropy(autocorr, autocorrSizeSub, percentileZero, rotation=False)
 
-        if (plotSpectrum == '2d') or (plotSpectrum == '2d+autocorr') or (plotSpectrum == 'wavelets'):
+        if ('2d' in analysis) or ('2d+autocorr' in analysis) or ('wavelets' in analysis):
             cov2logPS = True # Whether to compute the anisotropy on the log of the 2d PS
             # Extract central region of 2d power spectrum and compute covariance
             if cov2logPS:
@@ -473,28 +472,9 @@ while timeLocal <= timeEnd:
             psd2dsub, eccentricity_ps, orientation_ps, xbar_ps, ybar_ps, eigvals_ps, eigvecs_ps, percZero_ps, psd2dsubSmooth = st.compute_fft_anisotropy(psd2d_anis, fftSizeSub, percentileZero, sigma = smoothing_sigma)
         
             print(percentileZero,'- percentile = ', percZero_ps)
+        
         # Compute 1D radially averaged power spectrum
-        bin_size = 1
-        nr_pixels, bin_centers, psd1d = radialprofile.azimuthalAverage(psd2d, binsize=bin_size, return_nr=True)
-        fieldSize = r.rainrate.shape
-        minFieldSize = np.min(fieldSize)
-        
-        # Extract subset of spectrum
-        validBins = (bin_centers < minFieldSize/2) # takes the minimum dimension of the image and divide it by two
-        psd1d = psd1d[validBins]
-        
-        # Compute frequencies
-        freq = fftpack.fftfreq(minFieldSize, d=float(resKm))
-        freqAll = np.fft.fftshift(freq)
-        
-        # Select only positive frequencies
-        freq = freqAll[len(psd1d):] 
-        
-        # Compute wavelength [km]
-        with np.errstate(divide='ignore'):
-            wavelengthKm = resKm*(1.0/freq)
-        # Replace 0 frequency with NaN
-        freq[freq==0] = np.nan
+        psd1d, freq, wavelengthKm = st.compute_radialAverage_spectrum(psd2d, resolution=resKm)
         
         ############ Compute spectral slopes Beta
         r_beta1_best = 0
@@ -582,19 +562,22 @@ while timeLocal <= timeEnd:
         
         ##################### COMPUTE SUMMARY STATS #####################################
         # Compute field statistics in rainfall units
-        rainmean = np.nanmean(r.rainrate.ravel())
-        rainstd = np.nanstd(r.rainrate.ravel())
-        raincondmean = np.nanmean(r.rainrateNans.ravel())
-        raincondstd = np.nanstd(r.rainrateNans.ravel())
-        
-        # Compute field statistics in dBZ units
-        dBZmean = np.nanmean(r.dBZ.ravel())
-        dBZstd = np.nanstd(r.dBZ.ravel())
-        dBZcondmean = np.nanmean(r.dBZNans.ravel())
-        dBZcondstd = np.nanstd(r.dBZNans.ravel())
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+
+            rainmean = np.nanmean(r.rainrate.ravel())
+            rainstd = np.nanstd(r.rainrate.ravel())
+            raincondmean = np.nanmean(r.rainrateNans.ravel())
+            raincondstd = np.nanstd(r.rainrateNans.ravel())
+            
+            # Compute field statistics in dBZ units
+            dBZmean = np.nanmean(r.dBZ.ravel())
+            dBZstd = np.nanstd(r.dBZ.ravel())
+            dBZcondmean = np.nanmean(r.dBZNans.ravel())
+            dBZcondstd = np.nanstd(r.dBZNans.ravel())
         
         # Compute Eulerian Auto-correlation 
-        if nrValidFields >= 2:
+        if (nrValidFields >= 2) and ('of' in analysis):
             corr_eul_lag1 = np.corrcoef(rainfallStack[0,:].flatten(), rainfallStack[1,:].flatten())
             corr_eul_lag1 = corr_eul_lag1[0,1]
             print("Eulerian correlation       =", fmt3 % corr_eul_lag1)
@@ -613,7 +596,7 @@ while timeLocal <= timeEnd:
             corr_eul_lag1 = np.nan
         
         # Compute Lagrangian auto-correlation
-        if nrValidFields >= 2:
+        if (nrValidFields >= 2) and ('of' in analysis):
             corr_lagr_lag1 = np.corrcoef(rainfield_lag1.flatten(), rainfallStack[0,:].flatten())
             corr_lagr_lag1 = corr_lagr_lag1[0,1]
             print("Lagrangian correlation     =", fmt3 % corr_lagr_lag1)
@@ -638,7 +621,7 @@ while timeLocal <= timeEnd:
         'beta1', 'corr_beta1', 'beta2', 'corr_beta2' , 'scaling_break', 'eccentricity', 'orientation',
         'corr_eul_lag1', 'corr_lagr_lag1']
         
-        if plotSpectrum == '2d':
+        if '2d' in analysis:
             eccentricity = eccentricity_ps
             orientation = orientation_ps
         else:
@@ -680,132 +663,153 @@ while timeLocal <= timeEnd:
         dailyStats.append(instantStats)
         
         ######################## PLOT WAVELETS ######################
-        if plotSpectrum == 'wavelets' and boolPlotting:
-            nrRows,nrCols = dt.optimal_size_subplot(nrMembers+1)
-            # Adjust figure parameters
-            ratioFig = nrCols/nrRows
-            figWidth = 14
-            colorbar = 'off'
-            fig = plt.figure(figsize=(ratioFig*figWidth,figWidth))
-            padding = 0.01
-            plt.subplots_adjust(hspace=0.05, wspace=0.01)
-            mpl.rcParams['image.interpolation'] = 'nearest'
+        if 'wavelets' in analysis and boolPlotting:
+            
+            if waveletNoise:
+                nrRows,nrCols = dt.optimal_size_subplot(nrMembers+1)
+                # Adjust figure parameters
+                ratioFig = nrCols/nrRows
+                figWidth = 14
+                colorbar = 'off'
+                fig = plt.figure(figsize=(ratioFig*figWidth,figWidth))
+                padding = 0.01
+                plt.subplots_adjust(hspace=0.05, wspace=0.01)
+                mpl.rcParams['image.interpolation'] = 'nearest'
 
-            # Plot rainfield
-            plt.subplot(nrRows, nrCols, 1)
-            PC = plt.imshow(rainfieldZeros, vmin=15, vmax=45)
-            plt.title('Rainfield [dBZ]',fontsize=15)
-            plt.axis('off')
-            
-            # Plot stochastic ensemble
-            for member in range(0, nrMembers):
-                plt.subplot(nrRows, nrCols, member+2)
-                plt.imshow(stochasticEnsemble[member],vmin=15, vmax=45)
-                plt.title('Member '+ str(member+1), fontsize=15)
+                # Plot rainfield
+                plt.subplot(nrRows, nrCols, 1)
+                PC = plt.imshow(r.dBZFourier, vmin=15, vmax=45)
+                plt.title('Rainfield [dBZ]',fontsize=15)
                 plt.axis('off')
-            plt.suptitle('Stochastic ensemble based on wavelet type: ' + wavelet + '\n by perturbing levels ' + str(level2perturb), fontsize=20)
-            
-            stringFigName = '/users/lforesti/results/' + product + yearStr + julianDayStr + hourminStr + '-' + wavelet + '-waveletEnsemble_' + timeAccumMinStr + '.png'
-            plt.savefig(stringFigName, dpi=300)
-            print(stringFigName, ' saved.')
-            plt.close()
+                
+                # Plot stochastic ensemble
+                for member in range(0, nrMembers):
+                    plt.subplot(nrRows, nrCols, member+2)
+                    plt.imshow(stochasticEnsemble[member],vmin=15, vmax=45)
+                    plt.title('Member '+ str(member+1), fontsize=15)
+                    plt.axis('off')
+                plt.suptitle('Stochastic ensemble based on wavelet type: ' + wavelet + '\n by perturbing levels ' + str(level2perturb), fontsize=20)
+                
+                stringFigName = '/users/lforesti/results/' + product + r.yearStr + r.julianDayStr + r.hourminStr + '-' + wavelet + '-waveletEnsemble_' + timeAccumMinStr + '.png'
+                plt.savefig(stringFigName, dpi=300)
+                print(stringFigName, ' saved.')
+                plt.close()
         
-            # Plots of the wavelet approximation at each scale
+            if waveletHVD:
+                # Plot of all the horizontal, diagonal and vertical components of the wavelet transform
+                pltWavelets = ['H','V','D']
+                nrPlots = (len(coeffs)-1)*len(pltWavelets)+2
+                mpl.rcParams['image.interpolation'] = 'none'
+                
+                nrRows,nrCols = dt.optimal_size_subplot(nrPlots)
+                print('Nr. plots = ' + str(nrPlots), ' in ', str(nrRows), 'x', str(nrCols))
+                
+                # Adjust figure parameters
+                ratioFig = nrCols/nrRows
+                figWidth = 14
+                colorbar = 'off'
+                fig = plt.figure(figsize=(ratioFig*figWidth,figWidth))
+                padding = 0.01
+                plt.subplots_adjust(hspace=0.05, wspace=0.01)
+                ###
+                
+                # Plot rainfield
+                ax1 = plt.subplot(nrRows, nrCols, 1)
+                PC = plt.imshow(r.dBZFourier, vmin=15, vmax=45)
+                    
+                plt.title('Rainfield [dBZ]')
+                plt.axis('off')
+                
+                # Colorbar
+                if colorbar == 'on':
+                    divider = make_axes_locatable(ax1)
+                    cax1 = divider.append_axes("right", size="5%", pad=padding)
+                    cbar = plt.colorbar(PC, cax = cax1)
+                
+                nplot = 2
+                for level in range(1,nrLevels+1):   
+                    for p in range(0,len(pltWavelets)):
+                        waveletLevel = nrLevels+1 - level
+                        
+                        # Plot wavelet coefficients for horizontal/vertical/diagonal components
+                        var = coeffs[waveletLevel][p]
+                        minimum = np.percentile(var, 1)
+                        maximum = np.percentile(var, 99)
+                        
+                        ax1 = plt.subplot(nrRows, nrCols, nplot)
+                        PC = plt.imshow(var, vmin=minimum, vmax=maximum, aspect=var.shape[1]/var.shape[0])
+
+                        if p == 0:
+                            titleStr = 'Level ' + str(level) + ' - horizontal'
+                        if p == 1:
+                            titleStr = 'Level ' + str(level) + ' - vertical'
+                        if p == 2:
+                            titleStr = 'Level ' + str(level) + ' - diagonal'
+                        plt.title(titleStr)
+                        plt.axis('off')
+                        
+                        # Colorbar
+                        if colorbar == 'on':
+                            divider = make_axes_locatable(ax1)
+                            cax1 = divider.append_axes("right", size="5%", pad=padding)
+                            cbar = plt.colorbar(PC, cax = cax1)
+
+                        nplot = nplot + 1
+                
+                # Plot approximation at last scale
+                minimum = np.percentile(cA2, 1)
+                maximum = np.percentile(cA2, 99)
+
+                ax1 = plt.subplot(nrRows, nrCols, nplot)
+                PC = plt.imshow(cA2, aspect=cA2.shape[1]/cA2.shape[0])
+
+                plt.title('Approximation')
+                plt.axis('off')
+                
+                # Colorbar
+                if colorbar == 'on':
+                    divider = make_axes_locatable(ax1)
+                    cax1 = divider.append_axes("right", size="5%", pad=padding)
+                    cbar = plt.colorbar(PC, cax = cax1)
+
+                plt.suptitle('Wavelet type: ' + wavelet, fontsize=20)
+                #plt.show()
+                waveletDirs = "".join(pltWavelets)
+                stringFigName = '/users/lforesti/results/' + product + r.yearStr + r.julianDayStr \
+                + r.hourminStr + '-' + wavelet + '-wavelet_' + waveletDirs + '_' + timeAccumMinStr + '.png'
+                plt.savefig(stringFigName, dpi=300)
+                print(stringFigName, ' saved.')
+            
+            ###### Plots of the wavelet approximation at each scale
             nrPlots = len(wavelet_coeff)
             nrRows,nrCols = dt.optimal_size_subplot(nrPlots)
-            
-            for scale in range(1, nrPlots+1):
+            fig = plt.figure()
+            ax = fig.add_axes()
+            ax = fig.add_subplot(111)
+
+            for scale in range(1,nrPlots+1):
                 plt.subplot(nrRows, nrCols, scale)
-                plt.imshow(wavelet_coeff[scale-1], interpolation='nearest')
-                plt.colorbar()
-            stringFigName = '/users/lforesti/results/' + product + yearStr + julianDayStr + hourminStr + '-' + wavelet + '-waveletApprox_' + timeAccumMinStr + '.png'
+                im = plt.imshow(wavelet_coeff[scale-1], vmin=r.dbzThreshold, vmax=50, interpolation='nearest')
+
+                if scale == nrPlots:
+                    scaleKm_l = (xvecs[scale-2][1] - xvecs[scale-2][0])*2
+                else:
+                    scaleKm_l = xvecs[scale-1][1] - xvecs[scale-1][0]
+                scaleKm_l = int(scaleKm/1000)
+                titleStr = 'Scale = ' + str(scaleKm_l) + ' km'
+                plt.title(titleStr, fontsize=12)
+                plt.axis('off')
+            
+            fig.tight_layout()
+            fig.subplots_adjust(top=0.92, right=0.8)
+            cbar_ax = fig.add_axes([0.90, 0.15, 0.03, 0.7])
+            fig.colorbar(im, cax=cbar_ax)
+            plt.suptitle('Low pass wavelet decomposition', fontsize=15)
+            
+            stringFigName = '/users/lforesti/results/' + product + r.yearStr + r.julianDayStr \
+            + r.hourminStr + '-' + wavelet + '-waveletApprox_' + timeAccumMinStr + '.png'
             plt.savefig(stringFigName, dpi=300)
             print(stringFigName, ' saved.')
-            sys.exit()
-            
-            # Plot of all the horizontal, diagonal and vertical components of the wavelet transform
-            pltWavelets = ['H','V','D']
-            nrPlots = (len(coeffs)-1)*len(pltWavelets)+2
-            mpl.rcParams['image.interpolation'] = 'none'
-            
-            nrRows,nrCols = dt.optimal_size_subplot(nrPlots)
-            print('Nr. plots = ' + str(nrPlots), ' in ', str(nrRows), 'x', str(nrCols))
-            
-            # Adjust figure parameters
-            ratioFig = nrCols/nrRows
-            figWidth = 14
-            colorbar = 'off'
-            fig = plt.figure(figsize=(ratioFig*figWidth,figWidth))
-            padding = 0.01
-            plt.subplots_adjust(hspace=0.05, wspace=0.01)
-            ###
-            
-            # Plot rainfield
-            ax1 = plt.subplot(nrRows, nrCols, 1)
-            PC = plt.imshow(rainfieldZeros, vmin=15, vmax=45)
-                
-            plt.title('Rainfield [dBZ]')
-            plt.axis('off')
-            
-            # Colorbar
-            if colorbar == 'on':
-                divider = make_axes_locatable(ax1)
-                cax1 = divider.append_axes("right", size="5%", pad=padding)
-                cbar = plt.colorbar(PC, cax = cax1)
-            
-            nplot = 2
-            for level in range(1,nrLevels+1):   
-                for p in range(0,len(pltWavelets)):
-                    waveletLevel = nrLevels+1 - level
-                    
-                    # Plot wavelet coefficients for horizontal/vertical/diagonal components
-                    var = coeffs[waveletLevel][p]
-                    minimum = np.percentile(var, 1)
-                    maximum = np.percentile(var, 99)
-                    
-                    ax1 = plt.subplot(nrRows, nrCols, nplot)
-                    PC = plt.imshow(var, vmin=minimum, vmax=maximum, aspect=var.shape[1]/var.shape[0])
-
-                    if p == 0:
-                        titleStr = 'Level ' + str(level) + ' - horizontal'
-                    if p == 1:
-                        titleStr = 'Level ' + str(level) + ' - vertical'
-                    if p == 2:
-                        titleStr = 'Level ' + str(level) + ' - diagonal'
-                    plt.title(titleStr)
-                    plt.axis('off')
-                    
-                    # Colorbar
-                    if colorbar == 'on':
-                        divider = make_axes_locatable(ax1)
-                        cax1 = divider.append_axes("right", size="5%", pad=padding)
-                        cbar = plt.colorbar(PC, cax = cax1)
-
-                    nplot = nplot + 1
-            
-            # Plot Approximation
-            minimum = np.percentile(cA2, 1)
-            maximum = np.percentile(cA2, 99)
-
-            ax1 = plt.subplot(nrRows, nrCols, nplot)
-            PC = plt.imshow(cA2, aspect=cA2.shape[1]/cA2.shape[0])
-
-            plt.title('Approximation')
-            plt.axis('off')
-            
-            # Colorbar
-            if colorbar == 'on':
-                divider = make_axes_locatable(ax1)
-                cax1 = divider.append_axes("right", size="5%", pad=padding)
-                cbar = plt.colorbar(PC, cax = cax1)
-
-            plt.suptitle('Wavelet type: ' + wavelet, fontsize=20)
-            #plt.show()
-            waveletDirs = "".join(pltWavelets)
-            stringFigName = '/users/lforesti/results/' + product + yearStr + julianDayStr + hourminStr + '_' + waveletDirs + '-' + wavelet + '-wavelet_' + timeAccumMinStr + '.png'
-            plt.savefig(stringFigName, dpi=300)
-            print(stringFigName, ' saved.')
-            sys.exit()
             
         ################ PLOTTING RAINFIELD #################################
         # ++++++++++++
@@ -819,335 +823,344 @@ while timeLocal <= timeEnd:
             mpl.rcParams['ytick.labelsize'] = ticksSize 
             
             plt.close("all")
-            if plotSpectrum == '2d+autocorr':
-                fig = plt.figure(figsize=(8.3,20))
-            else:
-                fig = plt.figure(figsize=(16,7.5))
+
+            analysisFFT = []
+            for i in range(0,len(analysis)):
+                if (analysis[i] == '1d') or (analysis[i] == '2d') or (analysis[i] == '2dnoise') or (analysis[i] == '2d+autocorr'):
+                    analysisFFT.append(analysis[i])
             
-            ax = fig.add_axes()
-            ax = fig.add_subplot(111)
-            
-            if plotSpectrum == '2d+autocorr':
-                rainAx = plt.subplot(311)
-            else:
-                rainAx = plt.subplot(121)
-            
-            # Draw DEM
-            rainAx.imshow(demImg, extent = r.extent, vmin=100, vmax=3000, cmap = plt.get_cmap('gray'))
-            
-            # Draw rainfield
-            rainIm = rainAx.imshow(rainratePlot, extent = r.extent, cmap=cmap, norm=norm, interpolation='nearest')
-            
-            # Draw shapefile
-            gis.read_plot_shapefile(fileNameShapefile, proj4stringWGS84, proj4stringCH,  ax = rainAx, linewidth = 0.75)
-            
-            if nrValidFields >= 2:
-                ycoord_flipped = fftDomainSize-1-ys
-                plt.quiver(Xmin+xs*1000, Ymin+ycoord_flipped*1000, Us, -Vs, angles = 'xy', scale_units='xy')
-                #plt.quiver(Xmin+x*1000, Ymin+ycoord_flipped*1000, u, -v, angles = 'xy', scale_units='xy')
-            # Colorbar
-            cbar = plt.colorbar(rainIm, ticks=clevs, spacing='uniform', norm=norm, extend='max', fraction=0.04)
-            cbar.ax.tick_params(labelsize=colorbarTicksSize)
-            cbar.set_ticklabels(clevsStr, update_ticks=True)
-            if (timeAccumMin == 1440):
-                cbar.ax.set_title("   mm/day",fontsize=unitsSize)
-            elif (timeAccumMin == 60):
-                cbar.ax.set_title("   mm/hr",fontsize=unitsSize)    
-            elif (timeAccumMin == 5):
-                if plotSpectrum == '2d+autocorr':
-                    cbar.set_label(r"mm hr$^{-1}$",fontsize=unitsSize)
+            # Loop over different analyses (1d, 2d autocorr)               
+            for an in analysisFFT:
+                if an == '2d+autocorr':
+                    fig = plt.figure(figsize=(8.3,20))
                 else:
-                    cbar.ax.set_title(r"   mm hr$^{-1}$",fontsize=unitsSize)
-            else:
-                print('Accum. units not defined.')
-            #cbar.ax.xaxis.set_label_position('top')
-
-            
-            # # Set ticks for dBZ on the other side
-            # ax2 =plt.twinx(ax=cbar.ax)
-            # dBZlimits,_,_ = dt.rainrate2reflectivity(clevs,A,b)
-            # dBZlimits = np.round(dBZlimits)
-            # ax2.set_ylim(-10, 10)
-            # ax2.set_yticklabels(dBZlimits)
-            
-            titleStr = timeLocal.strftime("%Y.%m.%d %H:%M") + ', ' + product + ' rainfall field, Q' + str(dataQuality)
-            titleStr = 'Radar rainfall field on ' + timeLocal.strftime("%Y.%m.%d %H:%M")
-            plt.title(titleStr, fontsize=titlesSize)
-            
-            # Draw radar composite mask
-            rainAx.imshow(mask, cmap=cmapMask, extent = (Xmin, Xmax, Ymin, Ymax), alpha = 0.5)
-            
-            # Add product quality within image
-            dataQualityTxt = "Quality = " + str(dataQuality)
-            
-            plt.text(-0.15,-0.12, "Eulerian      correlation = " + fmt3 % corr_eul_lag1, transform=rainAx.transAxes)
-            plt.text(-0.15,-0.15, "Lagrangian correlation = " + fmt3 % corr_lagr_lag1, transform=rainAx.transAxes)
-            diffPercEulLagr = (corr_lagr_lag1 - corr_eul_lag1)*100
-            plt.text(-0.15,-0.18, "Difference Lagr/Eul      = " + fmt2 % diffPercEulLagr + ' %', transform=rainAx.transAxes)
-            
-            # Set X and Y ticks for coordinates
-            xticks = np.arange(400, 900, 100)
-            yticks = np.arange(0, 500 ,100)
-            plt.xticks(xticks*1000, xticks)
-            plt.yticks(yticks*1000, yticks)
-            plt.xlabel('Swiss Easting [km]', fontsize=labelsSize)
-            plt.ylabel('Swiss Northing [km]', fontsize=labelsSize)
-            
-            #################### PLOT SPECTRA ###########################################################
-           
-            #++++++++++++ Draw 2d power spectrum
-            if (plotSpectrum == '2d') | (plotSpectrum == '2dnoise') | (plotSpectrum == '2d+autocorr'):
-                if plotSpectrum == '2d+autocorr':
-                    psAx = plt.subplot(312)
+                    fig = plt.figure(figsize=(16,7.5))
+                
+                ax = fig.add_axes()
+                ax = fig.add_subplot(111)
+                
+                if an == '2d+autocorr':
+                    rainAx = plt.subplot(311)
                 else:
-                    psAx = plt.subplot(122)
-
-                if fourierVar == 'rainrate':
-                    psLims =[-50,40]
-                if fourierVar == 'dbz':
-                    psLims = [-20,70]
-                extentFFT = (-minFieldSize/2,minFieldSize/2,-minFieldSize/2,minFieldSize/2)
-                if (plotSpectrum == '2d') | (plotSpectrum == '2d+autocorr'):
-                    # Smooth 2d PS for plotting contours
-                    if cov2logPS == False:
-                        psd2dsubSmooth = 10.0*np.log10(psd2dsubSmooth)
-
-                    # Plot image of 2d PS
-                    #psAx.invert_yaxis()
-                    clevsPS = np.arange(-5,70,5)
-                    cmapPS = plt.get_cmap('nipy_spectral', clevsPS.shape[0]) #nipy_spectral, gist_ncar
-                    normPS = colors.BoundaryNorm(clevsPS, cmapPS.N-1)
-                    cmapPS.set_over('white',1)
+                    rainAx = plt.subplot(121)
                     
-                    # Compute alpha transparency vector
-                    #cmapPS._init()
-                    #cmapPS._lut[clevsPS <= percZero,-1] = 0.5
-                    
-                    if cov2logPS:
-                        imPS = psAx.imshow(psd2dsub, interpolation='nearest', cmap=cmapPS, norm=normPS)
+                # Draw DEM
+                rainAx.imshow(demImg, extent = r.extent, vmin=100, vmax=3000, cmap = plt.get_cmap('gray'))
+                
+                # Draw rainfield
+                rainIm = rainAx.imshow(r.rainrateNans, extent = r.extent, cmap=cmap, norm=norm, interpolation='nearest')
+                
+                # Draw shapefile
+                gis.read_plot_shapefile(fileNameShapefile, proj4stringWGS84, proj4stringCH,  ax = rainAx, linewidth = 0.75)
+                
+                if nrValidFields >= 2:
+                    ycoord_flipped = fftDomainSize-1-ys
+                    plt.quiver(Xmin+xs*1000, Ymin+ycoord_flipped*1000, Us, -Vs, angles = 'xy', scale_units='xy')
+                    #plt.quiver(Xmin+x*1000, Ymin+ycoord_flipped*1000, u, -v, angles = 'xy', scale_units='xy')
+                # Colorbar
+                cbar = plt.colorbar(rainIm, ticks=clevs, spacing='uniform', norm=norm, extend='max', fraction=0.04)
+                cbar.ax.tick_params(labelsize=colorbarTicksSize)
+                cbar.set_ticklabels(clevsStr, update_ticks=True)
+                if (timeAccumMin == 1440):
+                    cbar.ax.set_title("   mm/day",fontsize=unitsSize)
+                elif (timeAccumMin == 60):
+                    cbar.ax.set_title("   mm/hr",fontsize=unitsSize)    
+                elif (timeAccumMin == 5):
+                    if an == '2d+autocorr':
+                        cbar.set_label(r"mm hr$^{-1}$",fontsize=unitsSize)
                     else:
-                        imPS = psAx.imshow(10.0*np.log10(psd2dsub), interpolation='nearest', cmap=cmapPS, norm=normPS)
+                        cbar.ax.set_title(r"   mm hr$^{-1}$",fontsize=unitsSize)
+                else:
+                    print('Accum. units not defined.')
+                #cbar.ax.xaxis.set_label_position('top')
+
+                
+                # # Set ticks for dBZ on the other side
+                # ax2 =plt.twinx(ax=cbar.ax)
+                # dBZlimits,_,_ = dt.rainrate2reflectivity(clevs,A,b)
+                # dBZlimits = np.round(dBZlimits)
+                # ax2.set_ylim(-10, 10)
+                # ax2.set_yticklabels(dBZlimits)
+                
+                titleStr = timeLocal.strftime("%Y.%m.%d %H:%M") + ', ' + product + ' rainfall field, Q' + str(r.dataQuality)
+                titleStr = 'Radar rainfall field on ' + timeLocal.strftime("%Y.%m.%d %H:%M")
+                plt.title(titleStr, fontsize=titlesSize)
+                
+                # Draw radar composite mask
+                rainAx.imshow(r.mask, cmap=r.cmapMask, extent = r.extent, alpha = 0.5)
+                
+                # Add product quality within image
+                dataQualityTxt = "Quality = " + str(r.dataQuality)
+                
+                plt.text(-0.15,-0.12, "Eulerian      correlation = " + fmt3 % corr_eul_lag1, transform=rainAx.transAxes)
+                plt.text(-0.15,-0.15, "Lagrangian correlation = " + fmt3 % corr_lagr_lag1, transform=rainAx.transAxes)
+                diffPercEulLagr = (corr_lagr_lag1 - corr_eul_lag1)*100
+                plt.text(-0.15,-0.18, "Difference Lagr/Eul      = " + fmt2 % diffPercEulLagr + ' %', transform=rainAx.transAxes)
+                
+                # Set X and Y ticks for coordinates
+                xticks = np.arange(400, 900, 100)
+                yticks = np.arange(0, 500 ,100)
+                plt.xticks(xticks*1000, xticks)
+                plt.yticks(yticks*1000, yticks)
+                plt.xlabel('Swiss Easting [km]', fontsize=labelsSize)
+                plt.ylabel('Swiss Northing [km]', fontsize=labelsSize)
+                
+                #################### PLOT SPECTRA ###########################################################
+               
+                #++++++++++++ Draw 2d power spectrum
+                if (an == '2d') | (an == '2dnoise') | (an == '2d+autocorr'):
+                    if an == '2d+autocorr':
+                        psAx = plt.subplot(312)
+                    else:
+                        psAx = plt.subplot(122)
+
+                    if fourierVar == 'rainrate':
+                        psLims =[-50,40]
+                    if fourierVar == 'dbz':
+                        psLims = [-20,70]
+                    extentFFT = (-minFieldSize/2,minFieldSize/2,-minFieldSize/2,minFieldSize/2)
+                    if (an == '2d') | (an == '2d+autocorr'):
+                        # Smooth 2d PS for plotting contours
+                        if cov2logPS == False:
+                            psd2dsubSmooth = 10.0*np.log10(psd2dsubSmooth)
+
+                        # Plot image of 2d PS
+                        #psAx.invert_yaxis()
+                        clevsPS = np.arange(-5,70,5)
+                        cmapPS = plt.get_cmap('nipy_spectral', clevsPS.shape[0]) #nipy_spectral, gist_ncar
+                        normPS = colors.BoundaryNorm(clevsPS, cmapPS.N-1)
+                        cmapPS.set_over('white',1)
+                        
+                        # Compute alpha transparency vector
+                        #cmapPS._init()
+                        #cmapPS._lut[clevsPS <= percZero,-1] = 0.5
+                        
+                        if cov2logPS:
+                            imPS = psAx.imshow(psd2dsub, interpolation='nearest', cmap=cmapPS, norm=normPS)
+                        else:
+                            imPS = psAx.imshow(10.0*np.log10(psd2dsub), interpolation='nearest', cmap=cmapPS, norm=normPS)
+                        
+                        # Plot smooth contour of 2d PS
+                        # percentiles = [70,80,90,95,98,99,99.5]
+                        # levelsPS = np.array(st.percentiles(psd2dsubSmooth, percentiles))
+                        # print("Contour levels quantiles: ",percentiles)
+                        # print("Contour levels 2d PS    : ", levelsPS)
+                        # if np.sum(levelsPS) != 0:
+                            # im1 = psAx.contour(psd2dsubSmooth, levelsPS, colors='black', alpha=0.25)
+                            # im1 = psAx.contour(psd2dsubSmooth, [percZero], colors='black', linestyles='dashed')
+                        
+                        # Plot major and minor axis of anisotropy
+                        #st.plot_bars(xbar_ps, ybar_ps, eigvals_ps, eigvecs_ps, psAx, 'red')
+                        
+                        #plt.text(0.05, 0.95, 'eccentricity = ' + str(fmt2 % eccentricity_ps), transform=psAx.transAxes, backgroundcolor = 'w', fontsize=14)
+                        #plt.text(0.05, 0.90, 'orientation = ' + str(fmt2 % orientation_ps) + '$^\circ$', transform=psAx.transAxes,backgroundcolor = 'w', fontsize=14)
+                        
+                        # Create ticks in km
+                        ticks_loc = np.arange(0,2*fftSizeSub,1)
+                        
+                        # List of ticks for X and Y (reference from top)
+                        ticksListX = np.hstack((np.flipud(-resKm/freq[1:fftSizeSub+1]),0,resKm/freq[1:fftSizeSub])).astype(int)
+                        ticksListY = np.flipud(ticksListX)
+                        
+                        # List of indices where to display the ticks
+                        if fftSizeSub <= 20:
+                            idxTicksX = np.hstack((np.arange(0,fftSizeSub-1,2),fftSizeSub-1,fftSizeSub+1,np.arange(fftSizeSub+2,2*fftSizeSub,2))).astype(int)
+                            idxTicksY = np.hstack((np.arange(1,fftSizeSub-2,2),fftSizeSub-2,fftSizeSub,np.arange(fftSizeSub+1,2*fftSizeSub,2))).astype(int)
+                        else:
+                            idxTicksX = np.hstack((np.arange(1,fftSizeSub-2,4),fftSizeSub-1,fftSizeSub+1,np.arange(fftSizeSub+3,2*fftSizeSub,4))).astype(int)
+                            idxTicksY = np.hstack((np.arange(0,fftSizeSub-3,4),fftSizeSub-2,fftSizeSub,np.arange(fftSizeSub+2,2*fftSizeSub,4))).astype(int)
+                        
+                        plt.xticks(rotation=90)
+                        psAx.set_xticks(ticks_loc[idxTicksX])
+                        psAx.set_xticklabels(ticksListX[idxTicksX], fontsize=13)
+                        psAx.set_yticks(ticks_loc[idxTicksY])
+                        psAx.set_yticklabels(ticksListY[idxTicksY], fontsize=13)
+
+                        plt.xlabel('Wavelenght [km]', fontsize=labelsSize)
+                        plt.ylabel('Wavelenght [km]', fontsize=labelsSize)
+                        
+                        #plt.gca().invert_yaxis()
+                    else:
+                        #plt.contourf(10*np.log10(psd2dnoise), 20, vmin=-15, vmax=0)
+                        
+                        imPS = plt.imshow(10*np.log10(psd2dnoise), extent=(extentFFT[0], extentFFT[1], extentFFT[2], extentFFT[3]), vmin=-15, vmax=0)
+                        plt.gca().invert_yaxis()
+                    cbar = plt.colorbar(imPS, ticks=clevsPS, spacing='uniform', norm=normPS, extend='max', fraction=0.04)
+                    cbar.ax.tick_params(labelsize=colorbarTicksSize)
+                    cbar.set_label(unitsSpectrum, fontsize=unitsSize)
+                    #cbar.ax.set_title(unitsSpectrum, fontsize=unitsSize)
+                    titleStr = '2D power spectrum (rotated by 90$^\circ$)'
+                    plt.title(titleStr, fontsize=titlesSize)
+                
+                #++++++++++++ Draw autocorrelation function
+                if (an == 'autocorr') | (an == '2d+autocorr'):
+                    if an == '2d+autocorr':
+                        autocorrAx = plt.subplot(313)
+                    else:
+                        autocorrAx = plt.subplot(122)
                     
-                    # Plot smooth contour of 2d PS
-                    # percentiles = [70,80,90,95,98,99,99.5]
-                    # levelsPS = np.array(st.percentiles(psd2dsubSmooth, percentiles))
-                    # print("Contour levels quantiles: ",percentiles)
-                    # print("Contour levels 2d PS    : ", levelsPS)
-                    # if np.sum(levelsPS) != 0:
-                        # im1 = psAx.contour(psd2dsubSmooth, levelsPS, colors='black', alpha=0.25)
-                        # im1 = psAx.contour(psd2dsubSmooth, [percZero], colors='black', linestyles='dashed')
+                    maxAutocov = np.max(autocorrSub)
+                    if maxAutocov > 50:
+                        clevsPS = np.arange(0,200,10)
+                    elif maxAutocov > 10:
+                        clevsPS = np.arange(0,50,5)
+                    else:
+                        clevsPS = np.arange(-0.05,1.05,0.05)
+                        clevsPSticks = np.arange(-0.,1.05,0.1)
+                    cmapPS = plt.get_cmap('nipy_spectral', clevsPS.shape[0]) #nipy_spectral, gist_ncar
+                    normPS = colors.BoundaryNorm(clevsPS, cmapPS.N)
+                    cmaplist = [cmapPS(i) for i in range(cmapPS.N)]
+                    # force the first color entry to be white
+                    #cmaplist[0] = (1,1,1,1.0)
                     
+                    # Create the new map
+                    cmapPS = cmapPS.from_list('Custom cmap', cmaplist, cmapPS.N)
+                    cmapPS.set_under('white',1)
+                    
+                    ext = (-autocorrSizeSub, autocorrSizeSub, -autocorrSizeSub, autocorrSizeSub)
+                    imPS = autocorrAx.imshow(np.flipud(autocorrSub), cmap = cmapPS, norm=normPS, extent = ext)
+                    #cbar = plt.colorbar(imPS, ticks=clevsPS, spacing='uniform', norm=normPS, extend='max', fraction=0.03)
+                    cbar = plt.colorbar(imPS, ticks=clevsPSticks, spacing='uniform', extend='min', norm=normPS,fraction=0.04)
+                    cbar.ax.tick_params(labelsize=colorbarTicksSize)
+                    cbar.set_label('correlation coefficient', fontsize=unitsSize)
+                    
+                    im1 = autocorrAx.contour(autocorrSub, clevsPS, colors='black', alpha = 0.25, extent = ext)
+                    im1 = autocorrAx.contour(autocorrSub, [percZero_autocorr], colors='black', linestyles='dashed', extent = ext) 
+
                     # Plot major and minor axis of anisotropy
-                    #st.plot_bars(xbar_ps, ybar_ps, eigvals_ps, eigvecs_ps, psAx, 'red')
+                    xbar_autocorr = xbar_autocorr - autocorrSizeSub
+                    ybar_autocorr = ybar_autocorr - autocorrSizeSub
+                    st.plot_bars(xbar_autocorr, ybar_autocorr, eigvals_autocorr, eigvecs_autocorr, autocorrAx, 'red')
+                    autocorrAx.invert_yaxis()
+                    # autocorrAx.axis('image')
                     
-                    #plt.text(0.05, 0.95, 'eccentricity = ' + str(fmt2 % eccentricity_ps), transform=psAx.transAxes, backgroundcolor = 'w', fontsize=14)
-                    #plt.text(0.05, 0.90, 'orientation = ' + str(fmt2 % orientation_ps) + '$^\circ$', transform=psAx.transAxes,backgroundcolor = 'w', fontsize=14)
+                    if an == '2d+autocorr':
+                        xoffset = 0.05
+                        yoffset = 0.93
+                        yspace = 0.04
+                        eccFontSize = 12
+                    else:
+                        xoffset = 0.05
+                        yoffset = 0.95
+                        yspace = 0.05
+                        eccFontSize = 14                        
+                    
+                    plt.text(xoffset, yoffset, 'eccentricity = ' + str(fmt2 % eccentricity_autocorr), transform=autocorrAx.transAxes, backgroundcolor = 'w', fontsize=eccFontSize)
+                    plt.text(xoffset, yoffset-yspace, 'orientation = ' + str(fmt2 % orientation_autocorr) + '$^\circ$', transform=autocorrAx.transAxes,backgroundcolor = 'w', fontsize=eccFontSize)
+                    
+                    plt.xticks(rotation=90) 
+                    autocorrAx.set_xlabel('Spatial lag [km]', fontsize=labelsSize)
+                    autocorrAx.set_ylabel('Spatial lag [km]', fontsize=labelsSize)
+                    
+                    titleStr = str(timeLocal) + ', 2D autocorrelation function (ifft(spectrum))'
+                    titleStr = '2D autocorrelation function'
+                    autocorrAx.set_title(titleStr, fontsize=titlesSize)
+                
+                #++++++++++++ Draw 1D power spectrum
+                if (an == '1d') | (an == '1dnoise'):
+                    psAx = plt.subplot(122)
+                    
+                    freqLimBeta1 = np.array([resKm/float(largeScalesLims[0]),resKm/float(largeScalesLims[1])])
+                    psdLimBeta1 = intercept_beta1+beta1*10*np.log10(freqLimBeta1)
+                    plt.plot(10*np.log10(freqLimBeta1), psdLimBeta1,'b--')
+                    
+                    freqLimBeta2 = np.array([resKm/float(smallScalesLims[0]),resKm/float(smallScalesLims[1])])
+                    psdLimBeta2 = intercept_beta2+beta2*10*np.log10(freqLimBeta2)
+                    plt.plot(10*np.log10(freqLimBeta2), psdLimBeta2,'r--')
+                    
+                    # Draw turning point
+                    plt.vlines(x=10*np.log10(1.0/scalingBreak_best), ymin=psdLimBeta2[0]-5, ymax = psdLimBeta2[0]+5, linewidth=0.5, color='grey')
+                    
+                    # Write betas and correlations
+                    startX = 0.67
+                    startY = 0.95
+                    offsetY = 0.04
+                    
+                    if weightedOLS == 0:
+                        txt = "Ordinary least squares"
+                    if weightedOLS == 1:
+                        txt = "Weighted ordinary least squares"
+
+                    # psAx.text(startX,startY, txt, color='k', transform=psAx.transAxes)
+                    
+                    txt = r'$\beta_1$ = ' + (fmt2 % beta1) + ",   r = " + (fmt3 % r_beta1)
+                    psAx.text(startX,startY-offsetY, txt, color='b', transform=psAx.transAxes)
+                    
+                    txt = r'$\beta_2$ = ' + (fmt2 % beta2) + ",   r = " + (fmt3 % r_beta2)
+                    psAx.text(startX,startY-2*offsetY, txt, color='r', transform=psAx.transAxes)
+                    
+                    txt = 'WAR = ' + (fmt1 % r.war) + ' %'
+                    psAx.text(startX,startY-3*offsetY, txt, transform=psAx.transAxes)
+                    
+                    txt = 'MM = ' + (fmt3 %raincondmean) + ' mm/hr'
+                    psAx.text(startX,startY-4*offsetY, txt, transform=psAx.transAxes)
+                    
+                    # if (args.minR < 0.01): 
+                        # txt = 'Rmin = ' + (fmt3 % args.minR) + ' mm/hr'
+                    # else:
+                        # txt = 'Rmin = ' + (fmt2 % args.minR) + ' mm/hr'
+                    # psAx.text(startX,startY-5*offsetY, txt, transform=psAx.transAxes)
+                    
+                    # txt = 'Scaling break = ' + str(scalingBreak_best) + ' km'
+                    # psAx.text(startX,startY-6*offsetY, txt, transform=psAx.transAxes)
+                    
+                    # txt = 'Zeros = ' + (fmt1 % zerosDBZ) + ' dBZ - ' + (fmt2 % args.minR) + ' mm/hr'
+                    # psAx.text(startX,startY-7*offsetY, txt, transform=psAx.transAxes, fontsize=10)
+                    
+                    if an == '1dnoise':
+                        # Draw 1d noise spectrum
+                        plt.plot(10*np.log10(freq),10*np.log10(psd1dnoise),'k')
+                    else:
+                        # Draw Power spectrum
+                        #print(10*np.log10(freq))
+                        plt.plot(10*np.log10(freq),10*np.log10(psd1d),'k')
+                        
+                    titleStr = 'Radially averaged power spectrum'
+                    plt.title(titleStr, fontsize=titlesSize)
+                    plt.xlabel("Wavelenght [km]", fontsize=15)
+                    
+                    plt.ylabel(unitsSpectrum, fontsize= 15)
+                    
+                    if fourierVar == 'rainrate':
+                        plt.ylim([-50.0,40.0])
+                    if fourierVar == 'dbz':
+                        plt.ylim([-20.0,70.0])
                     
                     # Create ticks in km
-                    ticks_loc = np.arange(0,2*fftSizeSub,1)
-                    
-                    # List of ticks for X and Y (reference from top)
-                    ticksListX = np.hstack((np.flipud(-resKm/freq[1:fftSizeSub+1]),0,resKm/freq[1:fftSizeSub])).astype(int)
-                    ticksListY = np.flipud(ticksListX)
-                    
-                    # List of indices where to display the ticks
-                    if fftSizeSub <= 20:
-                        idxTicksX = np.hstack((np.arange(0,fftSizeSub-1,2),fftSizeSub-1,fftSizeSub+1,np.arange(fftSizeSub+2,2*fftSizeSub,2))).astype(int)
-                        idxTicksY = np.hstack((np.arange(1,fftSizeSub-2,2),fftSizeSub-2,fftSizeSub,np.arange(fftSizeSub+1,2*fftSizeSub,2))).astype(int)
-                    else:
-                        idxTicksX = np.hstack((np.arange(1,fftSizeSub-2,4),fftSizeSub-1,fftSizeSub+1,np.arange(fftSizeSub+3,2*fftSizeSub,4))).astype(int)
-                        idxTicksY = np.hstack((np.arange(0,fftSizeSub-3,4),fftSizeSub-2,fftSizeSub,np.arange(fftSizeSub+2,2*fftSizeSub,4))).astype(int)
-                    
-                    plt.xticks(rotation=90)
-                    psAx.set_xticks(ticks_loc[idxTicksX])
-                    psAx.set_xticklabels(ticksListX[idxTicksX], fontsize=13)
-                    psAx.set_yticks(ticks_loc[idxTicksY])
-                    psAx.set_yticklabels(ticksListY[idxTicksY], fontsize=13)
+                    ticksList = []
+                    tickLocal = minFieldSize
+                    for i in range(0,20):
+                        ticksList.append(tickLocal)
+                        tickLocal = tickLocal/2
+                        if tickLocal < resKm:
+                            break
+                    ticks = np.array(ticksList, dtype=int)
+                    ticks_loc = 10.0*np.log10(1.0/ticks)
+                    psAx.set_xticks(ticks_loc)
+                    psAx.set_xticklabels(ticks)
+                
+                #plt.gcf().subplots_adjust(bottom=0.15, left=0.20)
+                fig.tight_layout()
+                
+                ########### SAVE AND COPY PLOTS
+                # Save plot in scratch
+                analysisType = an + 'PS'
+                stringFigName, inDir,_ = io.get_filename_stats(inBaseDir, analysisType, timeLocal,\
+                product, timeAccumMin=timeAccumMin, quality=0, minR=args.minR, wols=weightedOLS, format='png')
+                
+                with warnings.catch_warnings():  
+                    warnings.simplefilter("ignore") 
+                    plt.savefig(stringFigName,dpi=300)
+                print(stringFigName, ' saved.')
+                
+                # Copy plot to /store
+                stringFigNameOut, outDir,_  = io.get_filename_stats(outBaseDir, analysisType, timeLocal, product, timeAccumMin=timeAccumMin, \
+                quality=0, minR=args.minR, wols=weightedOLS, format='png')
 
-                    plt.xlabel('Wavelenght [km]', fontsize=labelsSize)
-                    plt.ylabel('Wavelenght [km]', fontsize=labelsSize)
-                    
-                    #plt.gca().invert_yaxis()
-                else:
-                    #plt.contourf(10*np.log10(psd2dnoise), 20, vmin=-15, vmax=0)
-                    
-                    imPS = plt.imshow(10*np.log10(psd2dnoise), extent=(extentFFT[0], extentFFT[1], extentFFT[2], extentFFT[3]), vmin=-15, vmax=0)
-                    plt.gca().invert_yaxis()
-                cbar = plt.colorbar(imPS, ticks=clevsPS, spacing='uniform', norm=normPS, extend='max', fraction=0.04)
-                cbar.ax.tick_params(labelsize=colorbarTicksSize)
-                cbar.set_label(unitsSpectrum, fontsize=unitsSize)
-                #cbar.ax.set_title(unitsSpectrum, fontsize=unitsSize)
-                titleStr = '2D power spectrum (rotated by 90$^\circ$)'
-                plt.title(titleStr, fontsize=titlesSize)
-            
-            #++++++++++++ Draw autocorrelation function
-            if (plotSpectrum == 'autocorr') | (plotSpectrum == '2d+autocorr'):
-                if plotSpectrum == '2d+autocorr':
-                    autocorrAx = plt.subplot(313)
-                else:
-                    autocorrAx = plt.subplot(122)
-                
-                maxAutocov = np.max(autocorrSub)
-                if maxAutocov > 50:
-                    clevsPS = np.arange(0,200,10)
-                elif maxAutocov > 10:
-                    clevsPS = np.arange(0,50,5)
-                else:
-                    clevsPS = np.arange(-0.05,1.05,0.05)
-                    clevsPSticks = np.arange(-0.,1.05,0.1)
-                cmapPS = plt.get_cmap('nipy_spectral', clevsPS.shape[0]) #nipy_spectral, gist_ncar
-                normPS = colors.BoundaryNorm(clevsPS, cmapPS.N)
-                cmaplist = [cmapPS(i) for i in range(cmapPS.N)]
-                # force the first color entry to be white
-                #cmaplist[0] = (1,1,1,1.0)
-                
-                # Create the new map
-                cmapPS = cmapPS.from_list('Custom cmap', cmaplist, cmapPS.N)
-                cmapPS.set_under('white',1)
-                
-                ext = (-autocorrSizeSub, autocorrSizeSub, -autocorrSizeSub, autocorrSizeSub)
-                imPS = autocorrAx.imshow(np.flipud(autocorrSub), cmap = cmapPS, norm=normPS, extent = ext)
-                #cbar = plt.colorbar(imPS, ticks=clevsPS, spacing='uniform', norm=normPS, extend='max', fraction=0.03)
-                cbar = plt.colorbar(imPS, ticks=clevsPSticks, spacing='uniform', extend='min', norm=normPS,fraction=0.04)
-                cbar.ax.tick_params(labelsize=colorbarTicksSize)
-                cbar.set_label('correlation coefficient', fontsize=unitsSize)
-                
-                im1 = autocorrAx.contour(autocorrSub, clevsPS, colors='black', alpha = 0.25, extent = ext)
-                im1 = autocorrAx.contour(autocorrSub, [percZero_autocorr], colors='black', linestyles='dashed', extent = ext) 
-
-                # Plot major and minor axis of anisotropy
-                xbar_autocorr = xbar_autocorr - autocorrSizeSub
-                ybar_autocorr = ybar_autocorr - autocorrSizeSub
-                st.plot_bars(xbar_autocorr, ybar_autocorr, eigvals_autocorr, eigvecs_autocorr, autocorrAx, 'red')
-                autocorrAx.invert_yaxis()
-                # autocorrAx.axis('image')
-                
-                if plotSpectrum == '2d+autocorr':
-                    xoffset = 0.05
-                    yoffset = 0.93
-                    yspace = 0.04
-                    eccFontSize = 12
-                else:
-                    xoffset = 0.05
-                    yoffset = 0.95
-                    yspace = 0.05
-                    eccFontSize = 14                        
-                
-                plt.text(xoffset, yoffset, 'eccentricity = ' + str(fmt2 % eccentricity_autocorr), transform=autocorrAx.transAxes, backgroundcolor = 'w', fontsize=eccFontSize)
-                plt.text(xoffset, yoffset-yspace, 'orientation = ' + str(fmt2 % orientation_autocorr) + '$^\circ$', transform=autocorrAx.transAxes,backgroundcolor = 'w', fontsize=eccFontSize)
-                
-                plt.xticks(rotation=90) 
-                autocorrAx.set_xlabel('Spatial lag [km]', fontsize=labelsSize)
-                autocorrAx.set_ylabel('Spatial lag [km]', fontsize=labelsSize)
-                
-                titleStr = str(timeLocal) + ', 2D autocorrelation function (ifft(spectrum))'
-                titleStr = '2D autocorrelation function'
-                autocorrAx.set_title(titleStr, fontsize=titlesSize)
-            
-            #++++++++++++ Draw 1D power spectrum
-            if (plotSpectrum == '1d') | (plotSpectrum == '1dnoise'):
-                psAx = plt.subplot(122)
-                
-                freqLimBeta1 = np.array([resKm/float(largeScalesLims[0]),resKm/float(largeScalesLims[1])])
-                psdLimBeta1 = intercept_beta1+beta1*10*np.log10(freqLimBeta1)
-                plt.plot(10*np.log10(freqLimBeta1), psdLimBeta1,'b--')
-                
-                freqLimBeta2 = np.array([resKm/float(smallScalesLims[0]),resKm/float(smallScalesLims[1])])
-                psdLimBeta2 = intercept_beta2+beta2*10*np.log10(freqLimBeta2)
-                plt.plot(10*np.log10(freqLimBeta2), psdLimBeta2,'r--')
-                
-                # Draw turning point
-                plt.vlines(x=10*np.log10(1.0/scalingBreak_best), ymin=psdLimBeta2[0]-5, ymax = psdLimBeta2[0]+5, linewidth=0.5, color='grey')
-                
-                # Write betas and correlations
-                startX = 0.67
-                startY = 0.95
-                offsetY = 0.04
-                
-                if weightedOLS == 0:
-                    txt = "Ordinary least squares"
-                if weightedOLS == 1:
-                    txt = "Weighted ordinary least squares"
-
-                # psAx.text(startX,startY, txt, color='k', transform=psAx.transAxes)
-                
-                txt = r'$\beta_1$ = ' + (fmt2 % beta1) + ",   r = " + (fmt3 % r_beta1)
-                psAx.text(startX,startY-offsetY, txt, color='b', transform=psAx.transAxes)
-                
-                txt = r'$\beta_2$ = ' + (fmt2 % beta2) + ",   r = " + (fmt3 % r_beta2)
-                psAx.text(startX,startY-2*offsetY, txt, color='r', transform=psAx.transAxes)
-                
-                txt = 'WAR = ' + (fmt1 % war) + ' %'
-                psAx.text(startX,startY-3*offsetY, txt, transform=psAx.transAxes)
-                
-                txt = 'MM = ' + (fmt3 %raincondmean) + ' mm/hr'
-                psAx.text(startX,startY-4*offsetY, txt, transform=psAx.transAxes)
-                
-                # if (rainThresholdWAR < 0.01): 
-                    # txt = 'Rmin = ' + (fmt3 % rainThresholdWAR) + ' mm/hr'
-                # else:
-                    # txt = 'Rmin = ' + (fmt2 % rainThresholdWAR) + ' mm/hr'
-                # psAx.text(startX,startY-5*offsetY, txt, transform=psAx.transAxes)
-                
-                # txt = 'Scaling break = ' + str(scalingBreak_best) + ' km'
-                # psAx.text(startX,startY-6*offsetY, txt, transform=psAx.transAxes)
-                
-                # txt = 'Zeros = ' + (fmt1 % zerosDBZ) + ' dBZ - ' + (fmt2 % rainThresholdWAR) + ' mm/hr'
-                # psAx.text(startX,startY-7*offsetY, txt, transform=psAx.transAxes, fontsize=10)
-                
-                if plotSpectrum == '1dnoise':
-                    # Draw 1d noise spectrum
-                    plt.plot(10*np.log10(freq),10*np.log10(psd1dnoise),'k')
-                else:
-                    # Draw Power spectrum
-                    #print(10*np.log10(freq))
-                    plt.plot(10*np.log10(freq),10*np.log10(psd1d),'k')
-                    
-                titleStr = 'Radially averaged power spectrum'
-                plt.title(titleStr, fontsize=titlesSize)
-                plt.xlabel("Wavelenght [km]", fontsize=15)
-                
-                plt.ylabel(unitsSpectrum, fontsize= 15)
-                
-                if fourierVar == 'rainrate':
-                    plt.ylim([-50.0,40.0])
-                if fourierVar == 'dbz':
-                    plt.ylim([-20.0,70.0])
-                
-                # Create ticks in km
-                ticksList = []
-                tickLocal = minFieldSize
-                for i in range(0,20):
-                    ticksList.append(tickLocal)
-                    tickLocal = tickLocal/2
-                    if tickLocal < resKm:
-                        break
-                ticks = np.array(ticksList, dtype=int)
-                ticks_loc = 10.0*np.log10(1.0/ticks)
-                psAx.set_xticks(ticks_loc)
-                psAx.set_xticklabels(ticks)
-            
-            #plt.gcf().subplots_adjust(bottom=0.15, left=0.20)
-            fig.tight_layout()
-            
-            ########### SAVE AND COPY PLOTS
-            # Save plot in scratch
-            analysisType = plotSpectrum + 'PS'
-            stringFigName, inDir,_ = io.get_filename_stats(inBaseDir, analysisType, timeLocal, product, timeAccumMin=timeAccumMin, quality=0, minR=rainThresholdWAR, wols=weightedOLS, format='png')
-            
-            with warnings.catch_warnings():  
-                warnings.simplefilter("ignore") 
-                plt.savefig(stringFigName,dpi=300)
-            print(stringFigName, ' saved.')
-            
-            # Copy plot to /store
-            stringFigNameOut, outDir,_  = io.get_filename_stats(outBaseDir, analysisType, timeLocal, product, timeAccumMin=timeAccumMin, \
-            quality=0, minR=rainThresholdWAR,  wols=weightedOLS, format='png')
-
-            cmd = 'mkdir -p ' + outDir
-            os.system(cmd)
-            shutil.copy(stringFigName, stringFigNameOut)
-            print('Copied: ', stringFigName, ' to ', stringFigNameOut)
+                cmd = 'mkdir -p ' + outDir
+                os.system(cmd)
+                shutil.copy(stringFigName, stringFigNameOut)
+                print('Copied: ', stringFigName, ' to ', stringFigNameOut)
     else:
         nrValidFields = 0 # Reset to 0 the number of valid fields with consecutive rainfall
         print('Not enough rain to compute statistics')
@@ -1156,8 +1169,12 @@ while timeLocal <= timeEnd:
     print('------------------')
     print('Nr valid samples during day: ', len(dailyStats)) 
     minNrDailySamples = 2
-    conditionForWriting = (len(dailyStats) >= minNrDailySamples) and ((r.hourminStr == '0000') or (timeLocal == timeEnd))
-    
+    try:
+        conditionForWriting = (len(dailyStats) >= minNrDailySamples) and ((hourminStr == '0000') or (timeLocal == timeEnd))
+    except:
+        print(dir(r))
+        sys.exit(1)
+        
     if conditionForWriting: 
         # List to numpy array 
         dailyStats = np.array(dailyStats) 
@@ -1169,10 +1186,10 @@ while timeLocal <= timeEnd:
         analysisType = 'STATS' 
         if hourminStr == '0000': 
             fileNameStats,_,_ = io.get_filename_stats(inBaseDir, analysisType, timePreviousDay, product, timeAccumMin=timeAccumMin,\
-            quality=0, minR=rainThresholdWAR, wols=weightedOLS, variableBreak = variableBreak, format=args.format) 
+            quality=0, minR=args.minR, wols=weightedOLS, variableBreak = variableBreak, format=args.format) 
         else: 
             fileNameStats,_,_ = io.get_filename_stats(inBaseDir, analysisType, timeLocal, product, timeAccumMin=timeAccumMin,\
-            quality=0, minR=rainThresholdWAR, wols=weightedOLS, variableBreak = variableBreak, format=args.format) 
+            quality=0, minR=args.minR, wols=weightedOLS, variableBreak = variableBreak, format=args.format) 
         
         # Write out files 
         spectralSlopeLims = [largeScalesLims_best[0], largeScalesLims_best[1], smallScalesLims_best[1]]
@@ -1182,22 +1199,55 @@ while timeLocal <= timeEnd:
                 io.write_csv_globalstats(fileNameStats, headers, dailyStats) 
             elif args.format == 'netcdf': 
                 # Write out NETCDF file 
-                io.write_netcdf_globalstats(fileNameStats, headers, dailyStats, str(rainThresholdWAR), str(weightedOLS), spectralSlopeLims) 
+                io.write_netcdf_globalstats(fileNameStats, headers, dailyStats, str(args.minR), str(weightedOLS), spectralSlopeLims) 
         
         print(fileNameStats, ' saved.') 
         
         #### Print out some average daily stats
         eulerian_corr_vector = np.array(dt.get_column_list(dailyStats,22)).astype(float)
         lagrangian_corr_vector = np.array(dt.get_column_list(dailyStats,23)).astype(float)
-        print('Daily average Eulerian correlation    =',np.nanmean(eulerian_corr_vector))
-        print('Daily average Lagrangian correlation  =',np.nanmean(lagrangian_corr_vector))
-        print('Daily difference Eul-Lagr correlation =',100*(np.nanmean(lagrangian_corr_vector) - np.nanmean(eulerian_corr_vector)),'%')
+        
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+
+            print('Daily average Eulerian correlation    =',np.nanmean(eulerian_corr_vector))
+            print('Daily average Lagrangian correlation  =',np.nanmean(lagrangian_corr_vector))
+            print('Daily difference Eul-Lagr correlation =',100*(np.nanmean(lagrangian_corr_vector) - np.nanmean(eulerian_corr_vector)),'%')
+        
+        #### Write out wavelet decomposed rainfall arrays
+        if 'wavelets' in analysis:
+            # Write out wavelet coefficients to netCDF file
+            analysisType = 'WAVELET'
+            
+            if hourminStr == '0000': 
+                fileNameWavelet,_,_ = io.get_filename_wavelets(inBaseDir, analysisType, timePreviousDay, product, \
+                timeAccumMin=timeAccumMin, scaleKM=scaleKm, format='netcdf')
+            else:
+                fileNameWavelet,_,_ = io.get_filename_wavelets(inBaseDir, analysisType, timeLocal, product, \
+                timeAccumMin=timeAccumMin, scaleKM=scaleKm, format='netcdf')
+
+            #timePreviousDayStr = ti.datetime2timestring(timePreviousDay)
+            # Write out netCDF file
+            io.write_netcdf_waveletscale(fileNameWavelet, dailyTimesWavelets, \
+            xvecs[scale2keep], yvecs[scale2keep], dailyWavelets, scaleKm, waveletType = wavelet)
+            print('Saved:', fileNameWavelet)
+        
+            # Copy wavelet netCDFs to /store
+            outFileNameWavelet,outDir,_ = io.get_filename_wavelets(outBaseDir, analysisType, timePreviousDay, product, \
+            timeAccumMin=timeAccumMin, scaleKM=scaleKm, format='netcdf')
+
+            cmd = 'mkdir -p ' + outDir
+            os.system(cmd)
+            shutil.copy(fileNameWavelet, outFileNameWavelet)
+            print('Copied: ', fileNameWavelet, ' to ', outFileNameWavelet)
         
         #### Reset dailyStats array 
-        dailyStats = [] 
+        dailyStats = []
+        dailyWavelets = []
+        dailyTimesWavelets = []
 
     ############ WRITE OUT DAILY VELOCITY FIELDS ###########################
-    if conditionForWriting:
+    if conditionForWriting and ('of' in analysis):
         analysisType = 'VELOCITY'
         fileNameFlow,_,_ = io.get_filename_stats(inBaseDir, analysisType, timeLocal, product, \
         timeAccumMin=timeAccumMin, quality=0, format='netcdf')

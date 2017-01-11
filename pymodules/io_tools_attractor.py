@@ -58,15 +58,7 @@ def read_gif_image(timeStartStr, product='AQC', minR = 0.08, fftDomainSize = 512
     allYcoords = np.arange(Ymin,Ymax+resKm*1000,resKm*1000)
     
     # colormap
-    color_list, clevs = dt.get_colorlist(cmaptype) 
-    clevsStr = []
-    for i in range(0,len(clevs)):
-        if (clevs[i] < 10) and (clevs[i] >= 1):
-            clevsStr.append(str('%.1f' % clevs[i]))
-        elif (clevs[i] < 1):
-            clevsStr.append(str('%.2f' % clevs[i]))
-        else:
-            clevsStr.append(str('%i' % clevs[i]))
+    color_list, clevs, clevsStr = dt.get_colorlist(cmaptype) 
 
     cmap = colors.ListedColormap(color_list)
     norm = colors.BoundaryNorm(clevs, cmap.N)
@@ -717,7 +709,7 @@ def write_netcdf_waveletcoeffs(fileName, timeStamps, \
     nc_fid.close() 
     
 def netcdf_list2wavelet_array(timeStart, timeEnd, inBaseDir, analysisType='WAVELET', \
-    product='AQC', timeAccumMin=5, scaleKM=None, minR=0.08):
+    product='AQC', timeAccumMin=5, scaleKM=None):
     
     timeAccumMinStr = '%05i' % (timeAccumMin)
     '''
