@@ -114,18 +114,20 @@ def read_gif_image(timeStartStr, product='AQC', minR = 0.08, fftDomainSize = 512
                 rainrate[rainrate != noData] = rainrate[rainrate != noData]*(60/5)
 
             # Get coordinates of reduced domain
-            extent = dt.get_reduced_extent(rainrate.shape[1], rainrate.shape[0], fftDomainSize, fftDomainSize)
-            Xmin = allXcoords[extent[0]]
-            Ymin = allYcoords[extent[1]]
-            Xmax = allXcoords[extent[2]]
-            Ymax = allYcoords[extent[3]]
+            if fftDomainSize>0:
+                extent = dt.get_reduced_extent(rainrate.shape[1], rainrate.shape[0], fftDomainSize, fftDomainSize)
+                Xmin = allXcoords[extent[0]]
+                Ymin = allYcoords[extent[1]]
+                Xmax = allXcoords[extent[2]]
+                Ymax = allYcoords[extent[3]]
             
             subXcoords = np.arange(Xmin,Xmax,resKm*1000)
             subYcoords = np.arange(Ymin,Ymax,resKm*1000)
             
             # Select 512x512 domain in the middle
-            rainrate = dt.extract_middle_domain(rainrate, fftDomainSize, fftDomainSize)
-            rain8bit = dt.extract_middle_domain(rain8bit, fftDomainSize, fftDomainSize)
+            if fftDomainSize>0:
+                rainrate = dt.extract_middle_domain(rainrate, fftDomainSize, fftDomainSize)
+                rain8bit = dt.extract_middle_domain(rain8bit, fftDomainSize, fftDomainSize)
           
             # Create mask radar composite
             mask = np.ones(rainrate.shape)
@@ -210,7 +212,10 @@ def read_gif_image(timeStartStr, product='AQC', minR = 0.08, fftDomainSize = 512
             radar_object.extent = (Xmin, Xmax, Ymin, Ymax)
             radar_object.subXcoords = subXcoords
             radar_object.subYcoords = subYcoords
-            radar_object.fftDomainSize = fftDomainSize
+            if dBZ.shape[0] == dBZ.shape[1]:
+                radar_object.fftDomainSize = dBZ.shape[0]
+            else:
+                radar_object.fftDomainSize = dBZ.shape
             
             # colormaps
             radar_object.cmap = cmap
