@@ -164,18 +164,40 @@ def extract_middle_domain(rainfield, domainSizeX, domainSizeY):
     
     return(rainfieldDomain)
 
-def get_colorlist(type):
+def get_colorlist(type='MeteoSwiss', units='R'):
     if type == 'STEPS':
         color_list = ['cyan','deepskyblue','dodgerblue','blue','chartreuse','limegreen','green','darkgreen','yellow','gold','orange','red','magenta','darkmagenta']
-        clevs = [0.1,0.25,0.4,0.63,1,1.6,2.5,4,6.3,10,16,25,40,63,100]
+        if units == 'R':
+            clevs = [0.1,0.25,0.4,0.63,1,1.6,2.5,4,6.3,10,16,25,40,63,100]
+        elif units == 'dBZ':
+            clevs = np.arange(-10,70,5)
+        else:
+            print('Wrong units in get_colorlist')
+            sys.exit(1)
     if type == 'MeteoSwiss':
         pinkHex = '#%02x%02x%02x' % (232, 215, 242)
         redgreyHex = '#%02x%02x%02x' % (156, 126, 148)
         color_list = [pinkHex, redgreyHex, "#640064","#AF00AF","#DC00DC","#3232C8","#0064FF","#009696","#00C832",
         "#64FF00","#96FF00","#C8FF00","#FFFF00","#FFC800","#FFA000","#FF7D00","#E11900"] # light gray "#D3D3D3"
-        clevs= [0,0.08,0.16,0.25,0.40,0.63,1,1.6,2.5,4,6.3,10,16,25,40,63,100,160]
+        if units == 'R':
+            clevs= [0,0.08,0.16,0.25,0.40,0.63,1,1.6,2.5,4,6.3,10,16,25,40,63,100,160]
+        elif units == 'dBZ':
+            clevs = np.arange(-10,70,5)
+        else:
+            print('Wrong units in get_colorlist')
+            sys.exit(1)
+    
+    # Color level strings    
+    clevsStr = []
+    for i in range(0,len(clevs)):
+        if (clevs[i] < 10) and (clevs[i] >= 1):
+            clevsStr.append(str('%.1f' % clevs[i]))
+        elif (clevs[i] < 1):
+            clevsStr.append(str('%.2f' % clevs[i]))
+        else:
+            clevsStr.append(str('%i' % clevs[i]))
         
-    return(color_list, clevs)
+    return(color_list, clevs, clevsStr)
 
 def dynamic_formatting_floats(floatArray):
     if type(floatArray) == list:
@@ -325,22 +347,31 @@ def update_progress(progress,processName = "Progress"):
     sys.stdout.flush()
     
 def optimal_size_subplot(nrPlots):
+    # Get divisors of number of plots
+    div = divisors(nrPlots)
+    
     if nrPlots == 1:
         nrRows = 1
         nrCols = 1
     elif nrPlots == 2:
         nrRows = 1
         nrCols = 2
-    elif nrPlots == 3 or nrPlots == 4:
+    elif nrPlots == 3:
+        nrRows = 1
+        nrCols = 3
+    elif nrPlots == 4:
         nrRows = 2
         nrCols = 2
     elif nrPlots == 5 or nrPlots == 6:
         nrRows = 2
         nrCols = 3
-    elif nrPlots >= 7 and nrPlots <= 9:
+    elif nrPlots == 7:
+        nrRows = 2
+        nrCols = 4
+    elif nrPlots == 8 or nrPlots == 9:
         nrRows = 3
         nrCols = 3
-    elif nrPlots >= 8 and nrPlots <= 12:
+    elif nrPlots >= 10 and nrPlots <= 12:
         nrRows = 3
         nrCols = 4
     elif nrPlots >= 13 and nrPlots <= 15:
@@ -349,11 +380,53 @@ def optimal_size_subplot(nrPlots):
     elif nrPlots >= 16 and nrPlots <= 20:
         nrRows = 4
         nrCols = 5
+    elif np.sqrt(nrPlots).is_integer():
+        nrRows = int(np.sqrt(nrPlots))
+        nrCols = int(np.sqrt(nrPlots))
+    elif len(div) > 1:
+        nrRows = int(np.sqrt(nrPlots))
+        idxCol = np.where(div > nrRows)[0]
+        
+        nrCols = div[idxCol[0]]
+
+        # remove unnecessary additional columns
+        nrColsMax = nrCols.copy()
+        for i in range(1,20):
+            if nrRows*(nrColsMax-i) >= nrPlots:
+                nrCols = nrColsMax - i
+            else:
+                break;
+        
     else:
         nrRows = int(np.sqrt(nrPlots))
-        nrCols = int(np.sqrt(nrPlots))+1
+        nrCols = int(np.sqrt(nrPlots)+1)
+        
+        nrColsMax = nrCols
+        # increase columns if necessary
+        for i in range(0,20):
+            if nrPlots >= nrRows*(nrColsMax+i):
+                nrCols = nrColsMax + i + 1
+            else:
+                break;
+    
+    if nrRows*nrCols < nrPlots:
+        print('Not enough rows and columns to draw all the subplots.')
+        print('Consider updating the function optimal_size_subplot.')
+        sys.exit(1)
     
     return(nrRows, nrCols)
+
+def divisors(number):
+    n = 1
+    div = []
+    while(n<number):
+        if(number%n==0):
+            div.append(n)
+        else:
+            pass
+        n += 1
+    div = np.array(div)
+    return(div)
     
 def fill_attractor_array_nan(arrayStats, timeStamps_datetime, timeSampMin = 5):
     if len(timeStamps_datetime) == len(arrayStats):

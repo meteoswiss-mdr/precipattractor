@@ -58,15 +58,7 @@ def read_gif_image(timeStartStr, product='AQC', minR = 0.08, fftDomainSize = 512
     allYcoords = np.arange(Ymin,Ymax+resKm*1000,resKm*1000)
     
     # colormap
-    color_list, clevs = dt.get_colorlist(cmaptype) 
-    clevsStr = []
-    for i in range(0,len(clevs)):
-        if (clevs[i] < 10) and (clevs[i] >= 1):
-            clevsStr.append(str('%.1f' % clevs[i]))
-        elif (clevs[i] < 1):
-            clevsStr.append(str('%.2f' % clevs[i]))
-        else:
-            clevsStr.append(str('%i' % clevs[i]))
+    color_list, clevs, clevsStr = dt.get_colorlist(cmaptype) 
 
     cmap = colors.ListedColormap(color_list)
     norm = colors.BoundaryNorm(clevs, cmap.N)
@@ -183,7 +175,7 @@ def read_gif_image(timeStartStr, product='AQC', minR = 0.08, fftDomainSize = 512
             
             ## Creates radar object
             radar_object = Radar_object()
-            
+
             # fields
             radar_object.dBZ = dBZ
             radar_object.dBZFourier = dBZFourier
@@ -233,6 +225,41 @@ def read_gif_image(timeStartStr, product='AQC', minR = 0.08, fftDomainSize = 512
             
     return(radar_object)    
     
+def get_filename_wavelets(inBaseDir, analysisType, timeDate, product='AQC', timeAccumMin=5, scaleKM=None, minR=0.08, format='netcdf'):
+    if format == 'netcdf':
+        extension = '.nc'
+    elif format == 'csv':
+        extension = '.csv'
+    elif format == 'png':
+        extension = '.png'
+    elif format == 'gif':
+        extension = '.gif'
+    else:
+        print('Wrong file format in get_filename_stats')
+        sys.exit(1)
+    
+    if scaleKM is None:
+        print('You have to input the spatial scale of the wavelet decomposition in KM')
+        sys.exit(1)
+        
+    # Create time timestamp strings
+    timeAccumMinStr = '%05i' % (timeAccumMin)
+    year, yearStr, julianDay, julianDayStr = ti.parse_datetime(timeDate)
+    hourminStr = ti.get_HHmm_str(timeDate.hour, timeDate.minute)
+    subDir = ti.get_subdir(timeDate.year, julianDay)
+        
+    inDir = inBaseDir + subDir
+    
+    ### Define filename of statistics
+    fullName = inDir + product + '_' + analysisType + '_' + str(scaleKM) + 'km_' + yearStr + julianDayStr + hourminStr + \
+        '_Rgt' + str(minR) + '_' + timeAccumMinStr + extension
+    
+    # Get directory name and base filename
+    dirName = inDir
+    fileName = os.path.basename(fullName)
+
+    return(fullName, dirName, fileName)
+
 def get_filename_stats(inBaseDir, analysisType, timeDate, product='AQC', timeAccumMin=5, quality=0, minR=0.08,  wols=0, variableBreak = 0, format='netcdf'):
     if format == 'netcdf':
         extension = '.nc'
@@ -263,7 +290,7 @@ def get_filename_stats(inBaseDir, analysisType, timeDate, product='AQC', timeAcc
     fileName = os.path.basename(fullName)
 
     return(fullName, dirName, fileName)
-
+    
 def get_filename_velocity(inBaseDir, analysisType, timeDate, product='AQC', timeAccumMin=5, quality=0, format='netcdf'):
     if format == 'netcdf':
         extension = '.nc'
@@ -679,61 +706,156 @@ def write_netcdf_waveletcoeffs(fileName, timeStamps, \
         w_nc_u.units = "amplitude"
         w_nc_u[:] = waveletCoeffScale
     
-    nc_fid.close()        
+    nc_fid.close() 
+    
+def netcdf_list2wavelet_array(timeStart, timeEnd, inBaseDir, analysisType='WAVELET', \
+    product='AQC', timeAccumMin=5, scaleKM=None):
+    
+    timeAccumMinStr = '%05i' % (timeAccumMin)
+    '''
+    
+    '''
+    
+    listWaveletScale = []
+    listTimeStamps = []
+    fieldSizeDone = False
+    
+    timeLocal = timeStart
+    while timeLocal <= timeEnd:
+        # Create filename
+        fileName,_,_ = get_filename_wavelets(inBaseDir, analysisType, timeLocal, product, \
+        timeAccumMin=timeAccumMin, scaleKM=scaleKM, format='netcdf')
 
-def write_netcdf_waveletscale(fileName, timeStamps, \
-    xvec, yvec, waveletCoeffs, scaleKM, waveletType = 'none', noData=-999.0):
+        try:
+            # Read netcdf
+            arrayWaveletScale, arrayTimes = read_netcdf_waveletscale(fileName)
+            
+            if (arrayWaveletScale[0].shape > 0) & (fieldSizeDone == False):
+                fieldSize = arrayWaveletScale[0].shape
+                fieldSizeDone = True
+            
+            # Flatten 2D arrays of wavelet coeffs
+            arrayWaveletScaleFlat = []
+            for t in range(0,len(arrayWaveletScale)):
+                arrayWaveletScaleFlat.append(arrayWaveletScale[t].ravel())
+                
+            # Concatenate lists
+            listWaveletScale = listWaveletScale + arrayWaveletScaleFlat
+            listTimeStamps = listTimeStamps + arrayTimes.tolist()
+            print(fileName, 'read successfully.')
+        except:
+            print(fileName, 'empty.')
+            
+        # Update time (one file per day)
+        timeLocal = timeLocal + datetime.timedelta(hours = 24)
+    
+    # Check if found data
+    if (len(listWaveletScale) == 0):
+        listWaveletScale = []
+        print('No data stored in array.')
+        return(listWaveletScale)
+    
+    # Sort list of lists by first variable (time) 
+    dataArray = np.column_stack((listTimeStamps, listWaveletScale))
+    dataArray[dataArray[:,0].argsort()]
+    
+    # Remove duplicates
+    df = pd.DataFrame(dataArray)
+    df = df.drop_duplicates(0)
+    
+    # Prepare output arrays
+    dataArray = df.values.tolist()
+    dataArray = np.array(dataArray)
+    
+    arrayTimeStamps = dataArray[:,0]
+    arrayWaveletScale = dataArray[:,1:]
+
+    return(arrayWaveletScale, arrayTimeStamps, fieldSize)
+    
+def read_netcdf_waveletscale(fileName):
+    # Open data set
+    nc_fid = Dataset(fileName, 'r', format='NETCDF4')
+    
+    # Read-in the array of timestamps
+    timeArray = nc_fid.variables['time'][:]
+    
+    # Read-in the array of wavelet coefficients
+    waveletArray = nc_fid.variables['wc'][:]
+    nc_fid.close()
+
+    # Transpose the list of lists
+    # dataArray = zip(*dataArray)
+    return(waveletArray, timeArray)
+    
+def write_netcdf_waveletscale(fileName, timeStampsArray, \
+    xvec, yvec, waveletCoeffsArray, scaleKM, waveletType = 'none', noData=-999.0):
     '''
     Function to write out multiple fields of wavelet coefficients at ONE SELECTED SCALE to netCDF file
     '''
-    if type(timeStamps) is not list:
-        if type(timeStamps) is np.ndarray:
-            timeStamps = timeStamps.tolist()
+    
+    if len(timeStampsArray) != len(waveletCoeffsArray):
+        print('timeStampsArray and waveletCoeffsArray should have the same number of elements in write_netcdf_waveletscale')
+        print(len(timeStampsArray), 'vs', len(waveletCoeffsArray))
+        sys.exit(1)
+    
+    if type(timeStampsArray) is not list:
+        if type(timeStampsArray) is np.ndarray:
+            timeStampsArray = timeStampsArray.tolist()
         else:
-            timeStamps = [timeStamps]
+            timeStampsArray = [timeStampsArray]
     
-    # Create netCDF Dataset
-    nc_fid = Dataset(fileName, 'w', format='NETCDF4')
-    nc_fid.title = 'Wavelet coefficients of rainfall field'
-    nc_fid.institution = 'MeteoSwiss, Locarno-Monti'
-    nc_fid.description = waveletType + " wavelet"
-    nc_fid.comment = 'File generated the ' + str(datetime.datetime.now()) + '.'
-    nc_fid.noData = noData
+    try:
+        # Create netCDF Dataset
+        nc_fid = Dataset(fileName, 'w', format='NETCDF4')
+        nc_fid.title = 'Wavelet coefficients of rainfall field'
+        nc_fid.institution = 'MeteoSwiss, Locarno-Monti'
+        nc_fid.description = waveletType + " wavelet"
+        nc_fid.comment = 'File generated the ' + str(datetime.datetime.now()) + '.'
+        nc_fid.noData = noData
+        
+        # Time dimension
+        nrSamples = len(timeStampsArray)
+        nc_fid.createDimension('time', nrSamples) # Much larger file if putting 'None' (unlimited size) 
+        nc_time = nc_fid.createVariable('time', 'i8', dimensions=('time'))
+        nc_time.description = "Timestamp (UTC)"
+        nc_time.units = "%YYYY%MM%DD%HH%mm%SS"
+        nc_time[:] = timeStampsArray
+
+        # Spatial dimension
+        dimNames = ['x','y']
+        dimensions = [int(len(xvec)),int(len(yvec))]
+        for i in range(len(dimensions)):
+            nc_fid.createDimension(dimNames[i],dimensions[i])
+        
+        # Write out coordinates
+        w_nc_x = nc_fid.createVariable('x', 'f4', dimensions='x')
+        w_nc_x.description = "Swiss easting"
+        w_nc_x.units = "km"
+        w_nc_x[:] = xvec/1000
+        
+        w_nc_y = nc_fid.createVariable('y', 'f4', dimensions='y')
+        w_nc_y.description = "Swiss northing"
+        w_nc_y.units = "km"
+        w_nc_y[:] = yvec/1000
+        
+        # Write out wavelet coefficients
+        varName = 'wc'
+        
+        w_nc_u = nc_fid.createVariable(varName, 'f4', dimensions=('time', 'y', 'x'), zlib=True)
+        w_nc_u.description = "Wavelet coefficients at scale " + str(scaleKM) + ' km'
+        w_nc_u.units = "amplitude"
+        waveletCoeffsArray = np.array(waveletCoeffsArray)
+        w_nc_u[:] = waveletCoeffsArray
+        
+        nc_fid.close()
+    except:
+        print('NetCDF writing error in write_netcdf_waveletscale')
+        print('xvec:', xvec)
+        print('yvec:', yvec)
+        print('waveletCoeffsArray:', waveletCoeffsArray)
+        print('waveletCoeffsArray.shape:', waveletCoeffsArray.shape)
+        sys.exit(1)
     
-    # Time dimension
-    nrSamples = len(timeStamps)
-    nc_fid.createDimension('time', nrSamples) # Much larger file if putting 'None' (unlimited size) 
-    nc_time = nc_fid.createVariable('time', 'i8', dimensions=('time'))
-    nc_time.description = "Timestamp (UTC)"
-    nc_time.units = "%YYYY%MM%DD%HH%mm%SS"
-    nc_time[:] = timeStamps
-    print(xvec,yvec)
-    # Spatial dimension
-    dimNames = ['x','y']
-    dimensions = [int(len(xvec)),int(len(yvec))]
-    for i in range(len(dimensions)):
-        nc_fid.createDimension(dimNames[i],dimensions[i])
-    
-    # Write out coordinates
-    w_nc_x = nc_fid.createVariable('x', 'f4', dimensions='x')
-    w_nc_x.description = "Swiss easting"
-    w_nc_x.units = "km"
-    w_nc_x[:] = xvec/1000
-    
-    w_nc_y = nc_fid.createVariable('y', 'f4', dimensions='y')
-    w_nc_y.description = "Swiss northing"
-    w_nc_y.units = "km"
-    w_nc_y[:] = yvec/1000
-    
-    # Write out wavelet coefficients
-    varName = 'wc'
-    
-    w_nc_u = nc_fid.createVariable(varName, 'f4', dimensions=('time', 'y', 'x'), zlib=True)
-    w_nc_u.description = "Wavelet coefficients at scale " + str(scaleKM) + ' km'
-    w_nc_u.units = "amplitude"
-    w_nc_u[:] = waveletCoeffs
-    
-    nc_fid.close()
     
 def get_file_matching_expr(inDir, fileNameWildCard):
     listFilesDir = os.listdir(inDir)

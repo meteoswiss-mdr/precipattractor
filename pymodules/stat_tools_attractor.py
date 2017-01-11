@@ -19,13 +19,20 @@ import pywt
 
 import matplotlib.pyplot as plt
 
-from scipy import stats
+from scipy import stats, fftpack
+import scipy.signal as ss
 import scipy.ndimage as ndimage
 from skimage import measure
+import radialprofile
 
 import pandas as pd
 import statsmodels.formula.api as sm
 from statsmodels.nonparametric.api import KernelReg
+
+import scipy as sp
+import scipy.spatial.distance as dist
+
+fmt2 = "%.2f"
 
 def compute_war(rainfield, rainThreshold, noData):
     idxRain = rainfield >= rainThreshold
@@ -40,6 +47,14 @@ def compute_war(rainfield, rainThreshold, noData):
         print("WAR set to -1")
         war = -1
     return war
+
+def compute_war_array(rainfieldArray, rainThreshold, noData):
+    warArray = []
+    for i in range(0,len(rainfieldArray)):
+        war = compute_war(rainfieldArray[i], rainThreshold, noData)
+        warArray.append(war)
+    warArray = np.array(warArray)
+    return(warArray)
     
 def compute_beta(logScale, logPower):
     beta, intercept, r_beta, p_value, std_err = stats.linregress(logScale, logPower)
@@ -98,6 +113,88 @@ def compute_beta_sm(logScale, logPower, weights = None):
     
 def GaussianKernel(v1, v2, sigma):
     return exp(-norm(v1-v2, 2)**2/(2.*sigma**2))
+
+def compute_2d_spectrum(rainfallImage, resolution=1, window=None, FFTmod='NUMPY'):
+    '''
+    Function to compute the 2D FFT power spectrum.
+    
+    Parameters
+    ----------
+    rainfallImage : numpyarray(float)
+        Input 2d array with the rainfall field (or any kind of image)
+    resolution : float
+        Resolution of the image grid (e.g. in km) to compute the Fourier frequencies
+    '''
+    
+    fieldSize = rainfallImage.shape
+    minFieldSize = np.min(fieldSize)
+    
+    # Generate a window function
+    if window == 'blackman':
+        w1d = ss.blackman(minFieldSize)
+        w = np.outer(w1d,w1d)
+    elif window == 'hanning':
+        w1d = np.hanning(minFieldSize)
+        w = np.outer(w1d,w1d)
+    else:
+        w = np.ones((fieldSize[0],fieldSize[1]))    
+    
+    # Compute FFT
+    if FFTmod == 'NUMPY':
+        fprecipNoShift = np.fft.fft2(rainfallImage*w) # Numpy implementation
+    if FFTmod == 'FFTW':
+        fprecipNoShift = pyfftw.interfaces.numpy_fft.fft2(rainfallImage*window) # FFTW implementation
+        # Turn on the cache for optimum performance
+        pyfftw.interfaces.cache.enable()
+    
+    # Shift 2D spectrum
+    fprecip = np.fft.fftshift(fprecipNoShift)
+    
+    # Compute 2D power spectrum
+    psd2d = np.abs(fprecip)**2/(fieldSize[0]*fieldSize[1])    
+    
+    # Compute frequencies
+    freqNoShift = fftpack.fftfreq(minFieldSize, d=float(resolution))
+    freq = np.fft.fftshift(freqNoShift)
+    
+    return(psd2d, freq)
+
+def compute_radialAverage_spectrum(psd2d, resolution=1):
+    '''
+    Function to compute the 1D radially averaged spectrum from the 2D spectrum.
+    
+    Parameters
+    ----------
+    psd2d : numpyarray(float)
+        Input 2d array with the power spectrum.
+    resolution : float
+        Resolution of the image grid (e.g. in km) to compute the Fourier frequencies
+    '''
+    
+    fieldSize = psd2d.shape
+    minFieldSize = np.min(fieldSize)
+    
+    bin_size = 1
+    nr_pixels, bin_centers, psd1d = radialprofile.azimuthalAverage(psd2d, binsize=bin_size, return_nr=True)
+    
+    # Extract subset of spectrum
+    validBins = (bin_centers < minFieldSize/2) # takes the minimum dimension of the image and divide it by two
+    psd1d = psd1d[validBins]
+    
+    # Compute frequencies
+    freqNoShift = fftpack.fftfreq(minFieldSize, d=float(resolution))
+    freqAll = np.fft.fftshift(freqNoShift)
+    
+    # Select only positive frequencies
+    freq = freqAll[len(psd1d):]
+    
+    # Compute wavelength [km]
+    with np.errstate(divide='ignore'):
+        wavelength = resolution*(1.0/freq)
+    # Replace 0 frequency with NaN
+    freq[freq==0] = np.nan
+    
+    return(psd1d, freq, wavelength)
     
 def compute_fft_anisotropy(psd2d, fftSizeSub = -1, percentileZero = -1, rotation = True, radius = -1, sigma = -1, verbose = 0):
     ''' 
@@ -232,7 +329,7 @@ def compute_fft_anisotropy(psd2d, fftSizeSub = -1, percentileZero = -1, rotation
         
     return psd2dsub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs, percZero, psd2dsubSmooth
 
-def compute_autocorrelation_fft(imageArray, FFTmod = 'NUMPY'):
+def compute_autocorrelation_fft2(imageArray, FFTmod = 'NUMPY'):
     '''
     This function computes the autocorrelation of an image using the FFT.
     It exploits the Wiener-Khinchin theorem, which states that the Fourier transform of the auto-correlation function   
@@ -279,6 +376,196 @@ def compute_autocorrelation_fft(imageArray, FFTmod = 'NUMPY'):
     toc = time.clock()
     #print("Elapsed time for ACF using FFT: ", toc-tic, " seconds.")
     return(autocorrelation_shifted, powerSpectrum_shifted)
+
+def compute_autocorrelation_fft(timeSeries, FFTmod = 'NUMPY'):
+    '''
+    This function computes the autocorrelation of a time series using the FFT.
+    It exploits the Wiener-Khinchin theorem, which states that the Fourier transform of the auto-correlation function   
+    is equal to the Fourier transform of the signal. Thus, the autocorrelation function can be obtained as the inverse transform of
+    the power spectrum.
+    It is very important to know that the auto-correlation function, as it is referred to as in the literature, is in fact the noncentred
+    autocovariance. In order to obtain values of correlation between -1 and 1, one must center the signal by removing the mean before
+    computing the FFT and then divide the obtained auto-correlation (after inverse transform) by the variance of the signal.
+    '''
+    
+    tic = time.clock()
+    
+    # Compute field mean and variance
+    field_mean = np.mean(timeSeries)
+    field_var = np.var(timeSeries)
+    nr_samples = len(timeSeries)
+    
+    # Compute FFT
+    if FFTmod == 'NUMPY':
+        fourier = np.fft.fft(timeSeries - field_mean) # Numpy implementation
+    if FFTmod == 'FFTW':
+        fourier = pyfftw.interfaces.numpy_fft.fft(timeSeries - field_mean) # FFTW implementation
+        # Turn on the cache for optimum performance
+        pyfftw.interfaces.cache.enable()
+    
+    # Compute power spectrum
+    powerSpectrum = np.abs(fourier)**2/nr_samples
+    
+    # Compute inverse FFT of spectrum
+    if FFTmod == 'NUMPY':
+        autocovariance = np.fft.ifft(powerSpectrum) # Numpy implementation
+    if FFTmod == 'FFTW':
+        autocovariance = pyfftw.interfaces.numpy_fft.ifft(powerSpectrum) # FFTW implementation
+        # Turn on the cache for optimum performance
+        pyfftw.interfaces.cache.enable()
+    
+    # Compute auto-correlation from auto-covariance
+    autocorrelation = autocovariance.real/field_var
+    
+    # Take only first half (the autocorrelation and spectrum are symmetric)
+    autocorrelation = autocorrelation[0:nr_samples/2]
+    powerSpectrum = powerSpectrum[0:nr_samples/2]
+    
+    toc = time.clock()
+    #print("Elapsed time for ACF using FFT: ", toc-tic, " seconds.")
+    return(autocorrelation, powerSpectrum)
+
+def time_delay_embedding(timeSeries, nrSteps=1, stepSize=1, noData=np.nan):
+    timeSeries = np.array(timeSeries)
+    
+    nrSamples = len(timeSeries)
+    delayedArray = np.ones((nrSamples,nrSteps+1))*noData
+    delayedArray[:,0] = timeSeries
+    
+    for i in range(1,nrSteps+1):
+        # Generate nodata to append to the delayed time series
+        if i*stepSize <= nrSamples:
+            timeSeriesNoData = noData*np.ones(i*stepSize)
+        else:
+            timeSeriesNoData = noData*np.ones(nrSamples)
+        
+        # Get the delayed time series segment
+        timeSeriesSegment = timeSeries[i*stepSize:]
+        timeSeriesSegment = np.hstack((timeSeriesSegment, timeSeriesNoData)).tolist()
+        
+        delayedArray[:,i] = timeSeriesSegment
+    
+    return(delayedArray)
+        
+def correlation_dimension(dataArray, nrSteps=100, Lnorm=2, plot=False):
+    '''
+    Function to estimate the correlation dimension
+    '''
+    nr_samples = dataArray.shape[0]
+    nr_dimensions = dataArray.shape[1]
+    
+    # Compute the L_p norm between all pairs of points in the high dimensional space
+    # Correlation dimension requires the computation of the L1 norm (p=1), i.e. |Xi-Xj|
+    lp_distances = dist.squareform(dist.pdist(dataArray, p=Lnorm))
+    #lp_distances = dist.pdist(dataArray, p=1) # Which one appropriate? It gives different fractal dims...
+    
+    # Normalize distances by their st. dev.?
+    sd_dist = np.std(lp_distances)
+    #lp_distances = lp_distances/sd_dist
+    
+    # Define range of radii for which to evaluate the correlation sum Cr
+    strategyRadii = 'log'# 'log' or 'linear'
+    
+    if strategyRadii == 'linear':
+        r_min = np.min(lp_distances)
+        r_max = np.max(lp_distances)
+        radii = np.linspace(r_min, r_max, nrSteps)
+    if strategyRadii == 'log':
+        r_min = np.percentile(lp_distances[lp_distances != 0],0.01)
+        r_max = np.max(lp_distances)
+        radiiLog = np.linspace(np.log10(r_min), np.log10(r_max), nrSteps)
+        radii = 10**radiiLog
+    
+    Cr = []
+    for r in radii:
+        s = 1.0 / (nr_samples * (nr_samples-1)) * np.sum(lp_distances <= r) # fraction
+        #s = np.sum(lp_distances < r)/2 # count
+        Cr.append(s)
+    Cr = np.array(Cr)
+    
+    # Filter zeros from Cr
+    nonzero = np.where(Cr != 0)
+    radii = radii[nonzero]
+    Cr = Cr[nonzero]
+    
+    # Put r and Cr in log units
+    logRadii = np.log10(radii)
+    logCr = np.log10(Cr)
+    
+    fittingStrategy = 2
+    
+    ### Strategy 1 for fitting the slope
+    if fittingStrategy == 1:
+        # Define a subrange for which the log(Cr)-log(r) curve is linear and good for fitting
+        r_min_fit = np.percentile(lp_distances,5)
+        r_max_fit = np.percentile(lp_distances,50)
+        subsetIdxFitting = (radii >= r_min_fit) & (radii <= r_max_fit)
+        
+        # Compute correlation dimension as the linear slope in loglog plot
+        reg = sp.polyfit(logRadii[subsetIdxFitting], logCr[subsetIdxFitting], 1)
+        slope = reg[0]
+        fractalDim = slope
+        intercept = reg[1]
+    
+    ### Strategy 2 for fitting the slope
+    if fittingStrategy == 2:
+        nrPointsFitting = 20
+        startIdx = 0
+        maxSlope = 0.0
+        while startIdx < (len(radii) - nrPointsFitting):
+            subsetIdxFitting = np.arange(startIdx, startIdx+nrPointsFitting)
+            reg = sp.polyfit(logRadii[subsetIdxFitting], logCr[subsetIdxFitting], 1)
+            slope = reg[0]
+            intercept = reg[1]
+            if slope > maxSlope:
+                maxSlope = slope
+                maxIntercept = intercept
+            startIdx = startIdx + 2
+        # Get highest slope (largest fractal dimension estimation)
+        slope = maxSlope
+        fractalDim = slope
+        intercept = maxIntercept
+    
+    ######## Plot fitting of correlation dimension
+    if plot:
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        ax.plot(logRadii, logCr, 'b', linewidth=2)
+        regFit = intercept + slope*logRadii
+        plt.plot(logRadii, regFit, 'r', linewidth=2)
+        
+        plt.title('Correlation dimension estimation', fontsize=24)
+        plt.xlabel('log(r)', fontsize=20)
+        plt.ylabel('log(C(r))', fontsize=20)
+        
+        plt.text(0.05,0.95,'Sample size   = ' + str(nr_samples), transform=ax.transAxes, fontsize=16)
+        plt.text(0.05,0.90,'Embedding dim = ' + str(nr_dimensions), transform=ax.transAxes, fontsize=16)
+        plt.text(0.05,0.85,'Fractal dim   = ' + str(fmt2 % slope), transform=ax.transAxes, fontsize=16)
+        plt.show()
+        
+        # plt.imshow(lp_distances)
+        # plt.show()
+    
+    return(radii, Cr, fractalDim, intercept)
+
+def logarithmic_r(min_n, max_n, factor):
+	"""
+	Creates a list of values by successively multiplying a minimum value min_n by
+	a factor > 1 until a maximum value max_n is reached.
+
+	Args:
+		min_n (float): minimum value (must be < max_n)
+		max_n (float): maximum value (must be > min_n)
+		factor (float): factor used to increase min_n (must be > 1)
+
+	Returns:
+		list of floats: min_n, min_n * factor, min_n * factor^2, ... min_n * factor^i < max_n
+	"""
+	assert max_n > min_n
+	assert factor > 1
+	max_i = int(np.floor(np.log(1.0 * max_n / min_n) / np.log(factor)))
+    
+	return [min_n * (factor ** i) for i in range(max_i+1)]
     
 def percentiles(array, percentiles):
     '''
@@ -328,7 +615,6 @@ def smooth_extrapolate_velocity_field(u, v, prvs, next, sigma):
     trainingV = trainingV[trainingV == -999]
     
     from scipy.interpolate import Rbf
-    print(trainingX.shape)
     rbfi = Rbf(trainingX, trainingY, trainingU, epsilon = 10)
     uvec = rbfi(allCoords[:,0], allCoords[:,1])
     
@@ -339,7 +625,6 @@ def smooth_extrapolate_velocity_field(u, v, prvs, next, sigma):
     vgrid = vvec.reshape(nrRows,nrCols)
     
     flow = np.dstack((ugrid,vgrid))
-    print(flow.shape)
 
 #### Methods to compute the anisotropy ####
 def generate_data():
@@ -418,7 +703,6 @@ def wavelet_decomposition_2d(rainfield, wavelet = 'haar', nrLevels = None):
     if nrLevels == None:
         minDim = np.min([nrRows,nrRows])
         nrLevels = int(np.log2(minDim))
-        print(nrLevels)
     # Perform wavelet decomposition
     w = pywt.Wavelet(wavelet)
     
@@ -427,7 +711,7 @@ def wavelet_decomposition_2d(rainfield, wavelet = 'haar', nrLevels = None):
         # Decompose rainfield with wavelet
         cA, (cH, cV, cD) = pywt.dwt2(rainfield, wavelet)
         # Next rainfield to decompose is equal to the wavelet approximation
-        rainfield = cA
+        rainfield = cA/2.0
         wavelet_coeff.append(rainfield)
     
     return(wavelet_coeff)
@@ -516,10 +800,33 @@ def generate_wavelet_noise(rainfield, wavelet='db4', nrLevels=6, level2perturb='
         stochasticEnsemble.append(stochasticRain)
     
     return stochasticEnsemble
+
+def get_level_from_scale(resKM, scaleKM):
+    if resKM == scaleKM:
+        print('scaleKM should be larger than resKM in st.get_level_from_scale')
+        sys.exit()
+    elif isPower(scaleKM, resKM*2) == False:
+        print('scaleKM should be a power of 2 in st.get_level_from_scale')
+        sys.exit()
+        
+    for t in range(0,50):
+        resKM = resKM*2
+        if resKM == scaleKM:
+            level = t
+    return(level)
+
+def isPower(n, base):
+    return base**int(math.log(n, base)+.5)==n
+
     
-def to_zscores(data):
-    mean = np.nanmean(data)
-    stdev = np.nanstd(data)
+def to_zscores(data, axis=None):
+
+    if axis is None:
+        mean = np.nanmean(data)
+        stdev = np.nanstd(data)    
+    else:
+        mean = np.nanmean(data, axis=axis)
+        stdev = np.nanstd(data, axis=axis)
     
     zscores = (data - mean)/stdev
     
@@ -590,3 +897,50 @@ def box_cox_transform_test_lambdas(datain,lambdas=[]):
     ylims = np.percentile(ymax,60)
     plt.ylim((-1*ylims,ylims))
     plt.show()
+    
+def ortho_rotation(lam, method='varimax',gamma=None, 
+                    eps=1e-6, itermax=100): 
+    """ 
+    Return orthogal rotation matrix 
+
+    TODO: - other types beyond  
+    """ 
+    if gamma == None: 
+        if (method == 'varimax'): 
+            gamma = 1.0 
+        if (method == 'quartimax'): 
+            gamma = 0.0 
+
+    nrow, ncol = lam.shape
+    R = np.eye(ncol) 
+    var = 0 
+
+    for i in range(itermax): 
+        lam_rot = np.dot(lam, R) 
+        tmp = np.diag(np.sum(lam_rot ** 2, axis=0)) / nrow * gamma 
+        u, s, v = np.linalg.svd(np.dot(lam.T, lam_rot ** 3 - np.dot(lam_rot, tmp))) 
+        R = np.dot(u, v) 
+        var_new = np.sum(s) 
+        if var_new < var * (1 + eps): 
+            break 
+        var = var_new 
+
+    return R 
+
+
+from numpy import eye, asarray, dot, sum, diag
+from numpy.linalg import svd
+def varimax(Phi, gamma = 1.0, q = 20, tol = 1e-6):
+    p,k = Phi.shape
+    R = eye(k)
+    d=0
+    for i in xrange(q):
+        d_old = d
+        Lambda = dot(Phi, R)
+        u,s,vh = svd(dot(Phi.T,asarray(Lambda)**3 - (gamma/p) * dot(Lambda, diag(diag(dot(Lambda.T,Lambda))))))
+        R = dot(u,vh)
+        d = sum(s)
+        if d_old!=0 and d/d_old < 1 + tol: break
+    
+    Phi_rot = dot(Phi, R)
+    return(Phi_rot, R) 
