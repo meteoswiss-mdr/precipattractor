@@ -25,6 +25,7 @@ parser.add_argument('-start', default='201604010000', type=str,help='Start time 
 parser.add_argument('-end', default='201604010000', type=str,help='End time of the period: YYYYMMDDHHmmSS')
 parser.add_argument('-product', default='AQC', type=str,help='Which radar rainfall product to use (AQC, CPC, etc).')
 parser.add_argument('-accum', default=5, type=int,help='Accumulation time of the product [minutes].')
+parser.add_argument('-username', default='lforesti', type=str,help='')
 
 args = parser.parse_args()
 
@@ -38,6 +39,7 @@ else:
 product = args.product
 timeAccumMin = args.accum
 timeAccumMinStr = '%05i' % timeAccumMin
+username = args.username
 ################################
 
 timeStart = ti.timestring2datetime(timeStartStr)
@@ -80,7 +82,10 @@ while timeLocal <= timeEnd:
 
     # Unzip data in the output directory. Unzip only specific accumulation
     outFile = outDir + fileName
-    cmd = 'unzip -o ' + outFile + ' "*_' + timeAccumMinStr + '."*' + ' -d ' + outDir
+    if product == 'RZC':
+        cmd = 'unzip -o ' + outFile + ' "RZC????????[05]??.801"' + ' -d ' + outDir
+    else:
+        cmd = 'unzip -o ' + outFile + ' "*_' + timeAccumMinStr + '."*' + ' -d ' + outDir
     print(cmd)
     os.system(cmd)
 
