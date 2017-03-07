@@ -713,13 +713,14 @@ def write_netcdf_waveletcoeffs(fileName, timeStamps, \
     
     nc_fid.close() 
     
+#@profile
 def netcdf_list2wavelet_array(timeStart, timeEnd, inBaseDir, analysisType='WAVELET', \
     product='AQC', timeAccumMin=5, scaleKM=None):
+    '''
+    Fucntion to open a series of netCDF files containing "upscaled" rainfall fields with wavelets
+    '''  
     
     timeAccumMinStr = '%05i' % (timeAccumMin)
-    '''
-    
-    '''
     
     listWaveletScale = []
     listTimeStamps = []
@@ -733,7 +734,7 @@ def netcdf_list2wavelet_array(timeStart, timeEnd, inBaseDir, analysisType='WAVEL
 
         try:
             # Read netcdf
-            arrayWaveletScale, arrayTimes = read_netcdf_waveletscale(fileName)
+            arrayWaveletScale, arrayTimes, extent = read_netcdf_waveletscale(fileName)
             
             if (arrayWaveletScale[0].shape > 0) & (fieldSizeDone == False):
                 fieldSize = arrayWaveletScale[0].shape
@@ -760,22 +761,22 @@ def netcdf_list2wavelet_array(timeStart, timeEnd, inBaseDir, analysisType='WAVEL
         print('No data stored in array.')
         return(listWaveletScale)
     
-    # Sort list of lists by first variable (time) 
-    dataArray = np.column_stack((listTimeStamps, listWaveletScale))
-    dataArray[dataArray[:,0].argsort()]
+    # Convert to numpy arrays
+    arrayTimeStamps = np.asarray(listTimeStamps)
+    arrayWaveletScale = np.asarray(listWaveletScale)
     
     # Remove duplicates
-    df = pd.DataFrame(dataArray)
-    df = df.drop_duplicates(0)
-    
-    # Prepare output arrays
-    dataArray = df.values.tolist()
-    dataArray = np.array(dataArray)
-    
-    arrayTimeStamps = dataArray[:,0]
-    arrayWaveletScale = dataArray[:,1:]
+    uniqueTimeStamps, idxUnique = np.unique(arrayTimeStamps, return_index=True)
+    arrayTimeStamps = arrayTimeStamps[idxUnique]
+    arrayWaveletScale = arrayWaveletScale[idxUnique,:]
 
-    return(arrayWaveletScale, arrayTimeStamps, fieldSize)
+    # Sort list of lists by first variable (time) 
+    # dataArray = np.column_stack((arrayTimeStamps, arrayWaveletScale))
+    # dataArray[dataArray[:,0].argsort()]
+    # arrayTimeStamps = dataArray[:,0]
+    # arrayWaveletScale = dataArray[:,1:]
+
+    return(arrayWaveletScale, arrayTimeStamps, fieldSize, extent)
     
 def read_netcdf_waveletscale(fileName):
     # Open data set
@@ -786,11 +787,22 @@ def read_netcdf_waveletscale(fileName):
     
     # Read-in the array of wavelet coefficients
     waveletArray = nc_fid.variables['wc'][:]
+    
+    # Red-in the extent of the domain
+    xcoords = nc_fid.variables['x'][:]
+    ycoords = nc_fid.variables['y'][:]
+    
+    resX = np.abs(xcoords[1] - xcoords[0])
+    resY = np.abs(ycoords[1] - ycoords[0])
+    
+    extent = [np.min(xcoords), np.max(xcoords), np.min(ycoords), np.max(ycoords)]
+    extent = [np.min(xcoords)-resX/2, np.max(xcoords)+resX/2, np.min(ycoords)-resY/2, np.max(ycoords)+resY/2]
+    
     nc_fid.close()
 
     # Transpose the list of lists
     # dataArray = zip(*dataArray)
-    return(waveletArray, timeArray)
+    return(waveletArray, timeArray, extent)
     
 def write_netcdf_waveletscale(fileName, timeStampsArray, \
     xvec, yvec, waveletCoeffsArray, scaleKM, waveletType = 'none', noData=-999.0):

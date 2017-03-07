@@ -23,7 +23,7 @@ from scipy import stats, fftpack
 import scipy.signal as ss
 import scipy.ndimage as ndimage
 from skimage import measure
-import radialprofile
+import datetime as datetime
 
 import pandas as pd
 import statsmodels.formula.api as sm
@@ -32,10 +32,30 @@ from statsmodels.nonparametric.api import KernelReg
 import scipy as sp
 import scipy.spatial.distance as dist
 
+import radialprofile
+import time_tools_attractor as ti
+
 fmt2 = "%.2f"
 
-def compute_war(rainfield, rainThreshold, noData):
-    idxRain = rainfield >= rainThreshold
+def compute_imf(rainfield, rainThreshold=-1, noData=-999.0):
+    idxRain = (rainfield > rainThreshold) & (rainfield != noData)
+    
+    if len(idxRain) != 0:
+        imf = np.nanmean(rainfield[idxRain])
+    else:
+        imf = noData
+    return(imf)
+
+def compute_imf_array(rainfieldArray, rainThreshold=-1, noData=-999.0):
+    imfArray = []
+    for i in range(0,len(rainfieldArray)):
+        imf = compute_imf(rainfieldArray[i], rainThreshold, noData)
+        imfArray.append(imf)
+    imfArray = np.array(imfArray)
+    return(imfArray)
+    
+def compute_war(rainfield, rainThreshold, noData=-999.0):
+    idxRain = rainfield > rainThreshold
     idxRadarDomain = rainfield > noData + 1
     
     if (len(idxRain) >= 0) and (len(idxRain) < sys.maxsize) and \
@@ -45,10 +65,10 @@ def compute_war(rainfield, rainThreshold, noData):
     else:
         print("Problem in the computation of WAR. idxRain = ", idxRain, " and idxRadarDomain = ", idxRadarDomain, " are not valid values.")
         print("WAR set to -1")
-        war = -1
+        war = noData
     return war
 
-def compute_war_array(rainfieldArray, rainThreshold, noData):
+def compute_war_array(rainfieldArray, rainThreshold, noData=-999.0):
     warArray = []
     for i in range(0,len(rainfieldArray)):
         war = compute_war(rainfieldArray[i], rainThreshold, noData)
@@ -195,6 +215,28 @@ def compute_radialAverage_spectrum(psd2d, resolution=1):
     freq[freq==0] = np.nan
     
     return(psd1d, freq, wavelength)
+
+def create_xticks_1d_spectrum(maxScaleKM, minScaleKm):
+    '''
+    Use output as follows:
+    ax.set_xticks(ticks_loc)
+    ax.set_xticklabels(ticks)
+    or
+    plt.xticks(ticks_loc, ticks)
+    '''
+    # Create ticks in km
+    ticksList = []
+    tickLocal = maxScaleKM
+    for i in range(0,20):
+        ticksList.append(tickLocal)
+        tickLocal = tickLocal/2
+        if tickLocal < minScaleKm:
+            break
+    ticks = np.array(ticksList, dtype=int)
+    ticks_loc = 10.0*np.log10(1.0/ticks)
+    
+    return(ticks_loc, ticks)
+
     
 def compute_fft_anisotropy(psd2d, fftSizeSub = -1, percentileZero = -1, rotation = True, radius = -1, sigma = -1, verbose = 0):
     ''' 
@@ -329,7 +371,7 @@ def compute_fft_anisotropy(psd2d, fftSizeSub = -1, percentileZero = -1, rotation
         
     return psd2dsub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs, percZero, psd2dsubSmooth
 
-def compute_autocorrelation_fft2(imageArray, FFTmod = 'NUMPY'):
+def compute_autocorrelation_fft2(imageArray, resolution=1, FFTmod = 'NUMPY'):
     '''
     This function computes the autocorrelation of an image using the FFT.
     It exploits the Wiener-Khinchin theorem, which states that the Fourier transform of the auto-correlation function   
@@ -373,9 +415,16 @@ def compute_autocorrelation_fft2(imageArray, FFTmod = 'NUMPY'):
     autocorrelation_shifted = np.fft.fftshift(autocorrelation)
     powerSpectrum_shifted = np.fft.fftshift(powerSpectrum) # Add back mean to spectrum??
     
+    # Compute frequencies
+    freq_noshift = fftpack.fftfreq(np.min(field_dim), d=float(resolution))
+    freq_shifted = np.fft.fftshift(freq_noshift)
+    
+    # Compute lags
+    lag_shifted = np.arange(-np.min(field_dim)/2, (np.max(field_dim)/2)+1)*resolution
+    
     toc = time.clock()
     #print("Elapsed time for ACF using FFT: ", toc-tic, " seconds.")
-    return(autocorrelation_shifted, powerSpectrum_shifted)
+    return(autocorrelation_shifted, lag_shifted, powerSpectrum_shifted, freq_shifted)
 
 def compute_autocorrelation_fft(timeSeries, FFTmod = 'NUMPY'):
     '''
@@ -931,6 +980,29 @@ def ortho_rotation(lam, method='varimax',gamma=None,
 from numpy import eye, asarray, dot, sum, diag
 from numpy.linalg import svd
 def varimax(Phi, gamma = 1.0, q = 20, tol = 1e-6):
+    '''
+    Function to compute the varimax rotation.
+    Adapted from http://stackoverflow.com/questions/17628589/perform-varimax-rotation-in-python-using-numpy
+    
+    Parameters
+    ----------
+    Phi : numpyarray(float)
+        Input matrix with the loadings (eigenvectors)
+    gamma : float
+        gamma = 1 (varimax), gamma = 0 (quartimax)
+    q : int
+        Maximum number of iterations
+    tol : float
+        Tolerance criterion to stop the iterations
+    
+    Returns
+    ----------
+    Phi_rot: numpyarray(float)
+        Output matrix with the rotated loadings (eigenvectors)
+    R: numpyarray(float)
+        Output rotation matrix (it can be used to re-project the PC scores)
+    '''
+    
     p,k = Phi.shape
     R = eye(k)
     d=0
@@ -944,3 +1016,88 @@ def varimax(Phi, gamma = 1.0, q = 20, tol = 1e-6):
     
     Phi_rot = dot(Phi, R)
     return(Phi_rot, R) 
+
+def consecutive(data, stepsize=1):
+    return np.split(data, np.where(np.abs(np.diff(data)) != stepsize)[0]+1)
+   
+def retrieve_analogues(timeStampDt, timeStampDtArray, phaseSpaceArray, N=10, indepTimeHours=6):
+    '''
+    Function to retrieve the analogues from a dataset.
+    '''
+    
+    dataDim = phaseSpaceArray.shape
+    if len(timeStampDtArray) != phaseSpaceArray.shape[0]:
+        print(len(timeStampDtArray), 'vs', phaseSpaceArray.shape[0])
+        print('timeStampDtArray, phaseSpaceArray should have the same number of elements.')
+        sys.exit(1)
+    
+    if type(timeStampDt) == int:
+        timeStampDt = str(timeStampDt)
+    
+    # Find the asked time stamp index
+    targetIdx = np.where(ti.datetime2absolutetime(timeStampDt) == ti.datetime2absolutetime(timeStampDtArray))[0]
+    
+    if len(targetIdx) == 0:
+        print('The asked target timestamp is not in the archive.')
+        analogueIndices = []
+        analogueDateTimes = []
+        targetIdx = []
+        distances = []
+        return(analogueIndices, analogueDateTimes, targetIdx, distances)
+    
+    # Get values of phase space dimensions for that time stamp
+    targetFeatures = phaseSpaceArray[targetIdx,:]
+    
+    # Compute M-Dimensional Euclidean distances between target feature vector and all the archive
+    distancesArray = dist.cdist(targetFeatures, phaseSpaceArray, p=2)
+    distancesArray = distancesArray.flatten()
+    
+    # Collect the time stamps iteratively to respect the temporal independence criterion (e.g. 6 hours)
+    analogueIndices, analogueDateTimes = select_independent_times(timeStampDtArray, distancesArray, N=N, indepTimeHours=indepTimeHours, keepFirst=False)
+    
+    return(analogueIndices, analogueDateTimes, targetIdx, distancesArray)
+    
+def select_independent_times(timeStampDtArray, distancesArray, N=5, indepTimeHours=6, keepFirst=False):
+    
+    if keepFirst == True:
+        N = N-1
+    nrSamples = len(timeStampDtArray)
+    
+    # Sort Euclidean distances
+    sortedIdx = np.argsort(distancesArray)
+        
+    # Collect analogues iteratively to respect the independence criterion
+    indepTimeSecs = indepTimeHours*60*60
+    
+    nrAnalogues = 0
+    indepIndices = [sortedIdx[0]]
+    indepDateTimes = [timeStampDtArray[sortedIdx[0]]] # start with the sample with minimum distance (zero)
+    for a in range(0,nrSamples): 
+        analogueIdx = sortedIdx[a]
+        tmpDt = timeStampDtArray[analogueIdx]
+        
+        ## Check whether the new time stamp is far enough from the ones already collected
+        timeDiffArray = []
+        for t in range(0,len(indepDateTimes)):
+            timeDiff = np.abs((indepDateTimes[t] - tmpDt).total_seconds())
+            timeDiffArray.append(timeDiff)
+        timeDiffArray = np.array(timeDiffArray)
+        
+        ## If yes, collect it
+        if np.min(timeDiffArray) >= indepTimeSecs:
+            indepIndices.append(analogueIdx)
+            indepDateTimes.append(timeStampDtArray[analogueIdx])
+            
+            # If collected enough analogues break the loop
+            if len(indepIndices) > N:
+                break
+    
+    # Remove first element (analogue with itself)
+    if keepFirst == False:
+        indepIndices = indepIndices[1:]
+        indepDateTimes = indepDateTimes[1:]
+    
+    return(indepIndices, indepDateTimes)
+    
+    
+    

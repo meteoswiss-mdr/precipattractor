@@ -274,8 +274,14 @@ def toc(appendText):
     print('Time passed: {}h:{}m:{}s'.format(t_hour,t_min,t_sec), appendText)
     
 def sample_independent_times(timeStampsDt, indepTimeHours=6, method='start'):
+    '''
+    This function is not optimal as it selects the first time stamp respecting the condition (usually at the beginning of the event)
+    '''
     if len(timeStampsDt) <= 1:
         return(timeStampsDt,[0])
+    
+    sortedIdx = np.argsort(timeStampsDt)
+    timeStampsDt = np.sort(timeStampsDt)
     
     timeDiffs = np.diff(datetime2absolutetime(timeStampsDt))
     timeDiffs = np.hstack((timeDiffs[0], timeDiffs))
@@ -286,9 +292,11 @@ def sample_independent_times(timeStampsDt, indepTimeHours=6, method='start'):
     if method == 'start':
         timeDiffsAccum = 0
         indepIndices = []
+        indepTimeStampsDt = []
         for i in range(0,len(timeStampsDt)):
             if (i == 0) | (timeDiffs[i] >= indepTimeSecs) | (timeDiffsAccum >= indepTimeSecs):
-                indepIndices.append(i)
+                indepIndices.append(sortedIdx[i])
+                indepTimeStampsDt.append(sortedIdx[i])
                 timeDiffsAccum = 0
             else:
                 # Increment the accumulated time difference to avoid excluding the next sample 
@@ -297,7 +305,6 @@ def sample_independent_times(timeStampsDt, indepTimeHours=6, method='start'):
                 timeDiffsAccum = timeDiffsAccum + timeDiffs[i]
 
     indepIndices = np.array(indepIndices) 
-    indepTimeStampsDt = timeStampsDt[indepIndices]
-    #print(indepTimeStampsDt, indepIndices)
+    indepTimeStampsDt = np.array(indepTimeStampsDt)
     
     return(indepTimeStampsDt, indepIndices)

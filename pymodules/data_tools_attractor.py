@@ -88,8 +88,13 @@ def rainrate2reflectivity(rainrate, A=316.0, b=1.5, zerosDBZ='auto'):
     
     return dBZ, minDBZ, minRainRate
     
-def reflectivity2rainrate(reflectivityDBZ, A=316.0, b=1.5):
+def reflectivity2rainrate(reflectivityDBZ, zeroDBZ=0.0, A=316.0, b=1.5):
     rainrate = (10.0**(reflectivityDBZ/10.0)/A)**(1.0/b)
+    
+    # Replace zero rain rate with 0.0
+    zerorainrate = (10.0**(zeroDBZ/10.0)/A)**(1.0/b)
+    rainrate[rainrate <= zerorainrate] = 0.0
+    
     return(rainrate)
   
 def get_rainfall_lookuptable(noData, A=316.0, b=1.5):
