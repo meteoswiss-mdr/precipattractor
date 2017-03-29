@@ -120,7 +120,7 @@ def read_gif_image(timeStartStr, product='AQC', minR = 0.08, fftDomainSize = 512
                 Ymin = allYcoords[extent[1]]
                 Xmax = allXcoords[extent[2]]
                 Ymax = allYcoords[extent[3]]
-            
+
             subXcoords = np.arange(Xmin,Xmax,resKm*1000)
             subYcoords = np.arange(Ymin,Ymax,resKm*1000)
             

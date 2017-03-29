@@ -15,6 +15,7 @@ import sys
 import math 
 import time 
 import datetime as datetime
+import pandas as pd
 
 import numpy as np
 
@@ -144,9 +145,24 @@ def get_variable_indices(subsetVariableNames, listVariableNames):
     return(indices)
 
 def get_reduced_extent(width, height, domainSizeX, domainSizeY):
-    borderSizeX = (width - domainSizeX)/2
-    borderSizeY = (height - domainSizeY)/2
-    extent = (borderSizeX, borderSizeY, width-borderSizeX, height-borderSizeY) # left, upper, right, lower
+    '''
+        Function to get the indices of a central reduced extent of size (domainSizeX, domainSizeY) within a larger 2D array of size (width, height)
+    '''
+
+    if ((width - domainSizeX) % 2) == 0:
+        borderSizeX = (width - domainSizeX)/2
+    else:
+        print('Problem in get_reduced_extent. Non-even border size in X dimension.')
+        sys.exit(1)
+    if ((height - domainSizeY) % 2) == 0:
+        borderSizeY = (height - domainSizeY)/2
+    else:
+        print('Problem in get_reduced_extent. Non-even border size in Y dimension.')
+        sys.exit(1)
+        
+    # extent
+    extent = (int(borderSizeX), int(borderSizeY), int(width-borderSizeX), int(height-borderSizeY)) # left, upper, right, lower
+    
     return(extent)
     
 def extract_middle_domain_img(demImg, domainSizeX, domainSizeY):
@@ -324,7 +340,7 @@ def unique(array):
     uniq, index = np.unique(array, return_index=True)
     return uniq[index.argsort()]
     
-def update_progress(progress,processName = "Progress"):
+def update_progress(progress, processName = "Progress"):
     '''
     update_progress() : Displays or updates a console progress bar
     Accepts a float between 0 and 1. Any int will be converted to a float.
@@ -432,12 +448,49 @@ def divisors(number):
         n += 1
     div = np.array(div)
     return(div)
+
+def contiguous_regions(condition):
+    """Finds contiguous True regions of the boolean array "condition". Returns
+    a 2D array where the first column is the start index of the region and the
+    second column is the end index. Last index is not included (not need to add +1)
+    """
+
+    # Find the indicies of changes in "condition"
+    d = np.diff(condition)
+    idx, = d.nonzero() 
+
+    # We need to start things after the change in "condition". Therefore, 
+    # we'll shift the index by 1 to the right.
+    idx += 1
+
+    if condition[0]:
+        # If the start of condition is True prepend a 0
+        idx = np.r_[0, idx]
+
+    if condition[-1]:
+        # If the end of condition is True, append the length of the array
+        idx = np.r_[idx, condition.size] # Edit
+
+    # Reshape the result into two columns
+    idx.shape = (-1,2)
+    return idx
     
 def fill_attractor_array_nan(arrayStats, timeStamps_datetime, timeSampMin = 5):
+    
+    isStatsArrayNumpy = False
+    isTimesArrayNumpy = False
+    if type(timeStamps_datetime) == np.ndarray:
+        timeStamps_datetime = timeStamps_datetime.tolist()
+        isTimesArrayNumpy = True
+        
+    if type(arrayStats) == np.ndarray:
+        arrayStats = arrayStats.tolist()
+        isStatsArrayNumpy = True
+    
     if len(timeStamps_datetime) == len(arrayStats):
         nrSamples = len(timeStamps_datetime)
     else:
-        print("arrayStats, timeStamps_datetime in fill_attractor_array_nan should have the simze number of rows.")
+        print("arrayStats, timeStamps_datetime in fill_attractor_array_nan should have the same number of rows.")
         sys.exit(1)
     
     # Prepare list of NaNs
@@ -459,9 +512,64 @@ def fill_attractor_array_nan(arrayStats, timeStamps_datetime, timeSampMin = 5):
             arrayStats.insert(t+1,[missingDate] + emptyListNaN)
         t = t+1
         tstart = tstart + datetime.timedelta(minutes = timeSampMin)
+    
+    if isStatsArrayNumpy:
+        arrayStats = np.asarray(arrayStats)
+    if isTimesArrayNumpy:
+        timeStamps_datetime = np.asarray(timeStamps_datetime)
+    
+    return(arrayStats, timeStamps_datetime)
+    
+def fill_attractor_array_nan2(arrayStats, timeStamps_datetime, timeSampMin = 5):
+    '''
+    Attempt to make the previous function faster. Very expensive to convert list of lists to np.ndarray.
+    np.insert even slower...
+    '''
+    if len(timeStamps_datetime) == len(arrayStats):
+        nrSamples = len(timeStamps_datetime)
+    else:
+        print("arrayStats, timeStamps_datetime in fill_attractor_array_nan should have the same number of rows.")
+        sys.exit(1)
+    
+    # Prepare list of NaNs
+    emptyListNaN = np.empty((len(arrayStats[0]))) # without the first column
+    emptyListNaN[:] = np.nan
+    
+    # df = pd.DataFrame(timeStamps_datetime)
+    # df = pd.to_datetime(df)
+    # df = df.resample('D').fillna(0)
+
+    # print(df)
+    # df = df.resample('5T').sum()
+    # print(df)
+    # # df = df.fillna(np.nan)
+    # print(df)
+    # sys.exit()
+    
+    tend = timeStamps_datetime[nrSamples-1]
+    tstart = timeStamps_datetime[0]
+    t = 0
+    while tstart < tend:
+        diffTimeSecs = (timeStamps_datetime[t+1] - timeStamps_datetime[t]).total_seconds()
+        if diffTimeSecs > timeSampMin*60:
+            missingDateTime = timeStamps_datetime[t] + datetime.timedelta(minutes = timeSampMin)
+            # Insert missing date time
+            np.insert(timeStamps_datetime, t+1, missingDateTime, axis=0)
+            # Insert line of NaNs in arrayStats (except date)
+            missingDate = int(missingDateTime.strftime("%Y%m%d%H%M%S"))
+            np.insert(arrayStats, t+1, emptyListNaN, axis=0)
+
+        t = t+1
+        tstart = tstart + datetime.timedelta(minutes = timeSampMin)
+    
     return(arrayStats, timeStamps_datetime)
     
 def print_list_vertical(letters):
     for s1,s2 in zip(letters[:len(letters)//2], letters[len(letters)//2:]): #len(letters)/2 will work with every paired length list
-       print(s1,s2)    
+       print(s1,s2)
+
+def unique_rows(array):
+    new_array = [tuple(row) for row in array]
+    uniques = np.unique(new_array)
+    return(uniques)
     

@@ -131,7 +131,7 @@ cmap.set_over('black',1)
 cmapMask = colors.ListedColormap(['black'])
 
 # Load background DEM image
-dirDEM = '/users/' + usrName + '/pyscripts/shapefiles'
+dirDEM = '/users/' + usrName + '/scripts/shapefiles'
 fileNameDEM = dirDEM + '/ccs4.png'
 isFile = os.path.isfile(fileNameDEM)
 if (isFile == False):
