@@ -227,7 +227,6 @@ while timeLocal <= timeEnd:
         Xmax = r.extent[1]
         Ymin = r.extent[2]
         Ymax = r.extent[3]
-        print(r.extent)
         
         # Move older rainfall fields down the stack
         for s in range(0, rainfallStack.shape[0]-1):
@@ -387,7 +386,12 @@ while timeLocal <= timeEnd:
             w = pywt.Wavelet(wavelet)
             #print(w)
             
-            wavelet_coeff = st.wavelet_decomposition_2d(r.dBZFourier, wavelet, nrLevels = None)
+            # Upscale field in rainrate
+            wavelet_coeff = st.wavelet_decomposition_2d(r.rainrate, wavelet, nrLevels = None)
+            
+            # Transform into dBZ
+            for level in range(0,len(wavelet_coeff)):
+                wavelet_coeff[level],_,_ = dt.rainrate2reflectivity(wavelet_coeff[level])
             
             # Generate coordinates of centers of wavelet coefficients
             xvecs, yvecs = st.generate_wavelet_coordinates(wavelet_coeff, r.dBZFourier.shape, Xmin, Xmax, Ymin, Ymax, resKm*1000)
@@ -648,8 +652,8 @@ while timeLocal <= timeEnd:
         # Data
         instantStats = [timeStampStr,
         str(r.alb), 
-        str(r.doe), 
-        str(r.mle),
+        str(r.dol), 
+        str(r.lem),
         str(r.ppm),
         str(r.wei),             
         fmt4 % r.war,

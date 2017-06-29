@@ -110,7 +110,7 @@ else:
         print("No enough data found in NETCDF files.")
         sys.exit(1)
 
-## Save data into a single binary bython file to speed up further analysis with same dataset
+## Save data into a single binary python file to speed up further analysis with same dataset
 arrayData = []
 if refreshArchive == True:
     np.save(tmpArchiveFileName, arrayStats)
@@ -320,22 +320,34 @@ if plotHistScalingBreak:
 
 ####### PLOT SCALING BREAK VS ECCENTRICITY
 ecc_idx = dictIdxSubset['eccentricity']
+war_idx = dictIdxSubset['war']
+rcmean_idx = dictIdxSubset['r_cmean']
 b1_idx = dictIdxSubset['beta1']
 b2_idx = dictIdxSubset['beta2']
 
 ecc = varData[:,ecc_idx]
 eccDB = 10.0*np.log10(1-ecc)
+
+rcmean = varData[:,rcmean_idx]
+war = varData[:,war_idx]
+warDB = 10.0*np.log10(war) - 10.0*np.log10(rcmean)
+
 b1 = varData[:,b1_idx]
 b2 = varData[:,b2_idx]
 diffBeta = b2-b1
 
 nrBinsX = 50
 nrBinsY = 50
-xbins = np.linspace(np.min(eccDB), np.max(eccDB), nrBinsX)
+# xbins = np.linspace(np.min(eccDB), np.max(eccDB), nrBinsX)
+xbins = np.linspace(np.min(warDB), np.max(warDB), nrBinsX)
 ybins = np.linspace(np.min(diffBeta), np.max(diffBeta), nrBinsY)
 
 # Compute histogram
-counts, _, _ = np.histogram2d(eccDB, diffBeta, bins=(xbins, ybins))
+# counts, _, _ = np.histogram2d(eccDB, diffBeta, bins=(xbins, ybins))
+counts, _, _ = np.histogram2d(warDB, diffBeta, bins=(xbins, ybins))
+
+slope, intercept, r, p_value, std_err = stats.linregress(warDB, diffBeta)
+
 nrSamples = len(eccDB)
 counts[counts == 0] = np.nan
 counts = counts/nrSamples*100
@@ -349,7 +361,12 @@ mpl.rc('ytick', labelsize=15)
 # fig, ax = plt.subplots()
 # newax = ax.twiny()
 
-histIm = plt.pcolormesh(xbins, ybins, countsMask.T, vmax = maxFreq)                    
+plt.figure(figsize=(9,9))
+histIm = plt.pcolormesh(xbins, ybins, countsMask.T, vmax = maxFreq)
+
+# xrangeFit = np.array([np.min(xbins), np.max(xbins)])
+# plt.plot(xrangeFit, intercept + slope*xrangeFit)
+# plt.text(xrangeFit[0],intercept + slope*xrangeFit[0],'rho = ' + fmt2 % r)                   
 # plt.scatter(ecc, b2-b1)
 
 # Axes
@@ -362,8 +379,13 @@ histIm = plt.pcolormesh(xbins, ybins, countsMask.T, vmax = maxFreq)
 # newax.set_xticks(xlocs)
 # newax.set_xticklabels(xlabs)
 
-plt.xlabel('1-eccentricity [dB]', fontsize=22)
+# plt.xlabel('1-eccentricity [dB]', fontsize=22)
+plt.xlabel('WAR - MM [dB]', fontsize=22)
 plt.ylabel(r'$\beta_2$-$\beta_1$', fontsize=22)
+
+plt.text(15,-0.3, 'Light widespread \n stratiform rain \n WAR >> MM', fontsize=16)
+plt.text(-2,-0.3, 'Intense isolated \n convective rain \n MM >> WAR', fontsize=16)
+
 plt.show()
 sys.exit()
     
