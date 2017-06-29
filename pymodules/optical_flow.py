@@ -77,7 +77,6 @@ def threshold_features_to_track(image, maxCorners, minThr = 0.08, blockSize = 30
 
     return(p0, nCorners)
     
-    
 def LucasKanade_features_tracking(prvs, next, p0, winSize=(35,35), maxLevel=10):
     '''
     Function to call the Lucas-Kanade features tracking algorithm
@@ -113,7 +112,6 @@ def LucasKanade_features_tracking(prvs, next, p0, winSize=(35,35), maxLevel=10):
     v = (p1-p0)[:,:,1]    
     
     return(x0, y0, u, v, err)    
-    
     
 def declustering(x, y, u, v, R, minN=3):
     '''
@@ -202,7 +200,6 @@ def gaussian_kernel(distance,bandwidth):
     
     return(out)
     
-    
 def silverman(sigma,n):
     '''
     Silverman's rule of thumb for the estimation of the bandwidth 
@@ -212,7 +209,6 @@ def silverman(sigma,n):
     
     return(bandwidth)
 
-    
 def interpolate_sparse_vectors_kernel(x, y, u, v, domainSize, b = []):
     '''
     Gaussian kernel interpolation to obtain a dense field of motion vectors
@@ -259,7 +255,6 @@ def interpolate_sparse_vectors_kernel(x, y, u, v, domainSize, b = []):
     
     return(xgrid, ygrid, U, V, b)
     
-    
 def interpolate_sparse_vectors_linear(x, y, u, v, domainSize):
     '''
     Linear interpolation to obtain a dense field of motion vectors.
@@ -301,7 +296,6 @@ def interpolate_sparse_vectors_linear(x, y, u, v, domainSize):
     
     return(xgrid, ygrid, U, V)
     
-    
 def reduce_field_density_for_plotting(x, y, u, v, gridSpacing):
     '''
     Reduce density of arrows for plotting.
@@ -322,7 +316,6 @@ def reduce_field_density_for_plotting(x, y, u, v, gridSpacing):
     
     return(xSub, ySub, uSub, vSub)
     
-   
 def unique_rows(a):
     '''
     Returns unique combinations of rows in the matrix a.

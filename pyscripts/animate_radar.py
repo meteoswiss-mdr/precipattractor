@@ -64,15 +64,17 @@ windowFunction = 'none' #'blackman' or 'none'
 ########GET ARGUMENTS FROM CMD LINE####
 parser = argparse.ArgumentParser(description='Compute radar rainfall field statistics.')
 parser.add_argument('-start', default='201505151600', type=str,help='Starting date YYYYMMDDHHmmSS.')
-parser.add_argument('-end', default='201601310600', type=str,help='Ending date YYYYMMDDHHmmSS.')
+parser.add_argument('-end', default='201505152355', type=str,help='Ending date YYYYMMDDHHmmSS.')
 parser.add_argument('-product', default='AQC', type=str,help='Which radar rainfall product to use (AQC, CPC, etc).')
 parser.add_argument('-minR', default=0.08, type=float,help='Minimum rainfall rate for computation of WAR and various statistics.')
 parser.add_argument('-accum', default=5, type=int,help='Accumulation time of the product [minutes].')
 parser.add_argument('-temp', default=10, type=int,help='Temporal sampling of the products [minutes].')
 parser.add_argument('-dpi', default=150, type=int,help='Image resolution.')
-parser.add_argument('-delay', default=10, type=int,help='Display the next image after pausing.')
-parser.add_argument('-domainSizeLat', default=640, type=int,help='[km]')
-parser.add_argument('-domainSizeLon', default=640, type=int,help='[km]')
+parser.add_argument('-delay', default=20, type=int,help='Display the next image after pausing.')
+parser.add_argument('-domainSizeLat', default=512, type=int,help='[km]')
+parser.add_argument('-domainSizeLon', default=512, type=int,help='[km]')
+parser.add_argument('-figsize', default=9, type=float,help='')
+
 
 args = parser.parse_args()
 
@@ -81,6 +83,8 @@ timeAccumMin = args.accum
 dpi = args.dpi
 delay = args.delay
 domainSize = (args.domainSizeLat,args.domainSizeLon)
+figsize = args.figsize
+figsize = (figsize, figsize/1.2)
 
 if (timeAccumMin == 60) | (timeAccumMin == 60*24):
     timeSampMin = timeAccumMin
@@ -114,7 +118,7 @@ timeAccumMinStr = '%05i' % timeAccumMin
 timeAccum24hStr = '%05i' % (24*60)
 
 ## COLORMAPS
-color_list, clevs = dt.get_colorlist('MeteoSwiss') #'STEPS' or 'MeteoSwiss'
+color_list, clevs, clevsStr = dt.get_colorlist('MeteoSwiss') #'STEPS' or 'MeteoSwiss'
 clevsStr = []
 for i in range(0,len(clevs)):
     if (clevs[i] < 10) and (clevs[i] >= 1):
@@ -260,7 +264,7 @@ while timeLocal <= timeEnd:
                   
             ############# PLOTTING #################################
             plt.close("all")
-            fig = plt.figure(figsize=(9,7.5))
+            fig = plt.figure(figsize=(figsize[0],figsize[1]))
             
             ax = fig.add_axes()
             
@@ -279,13 +283,13 @@ while timeLocal <= timeEnd:
             cbar = plt.colorbar(rainIm, ticks=clevs, spacing='uniform', norm=norm, extend='max', fraction=0.03)
             cbar.set_ticklabels(clevsStr, update_ticks=True)
             if (timeAccumMin == 1440):
-                cbar.set_label("mm/day")
+                cbar.set_label(r"mm day$^{-1}$")
             elif (timeAccumMin == 60):
-                cbar.set_label("mm/hr")    
+                cbar.set_label(r"mm h$^{-1}$")    
             elif (timeAccumMin == 5) and (product == 'AQC'):
-                cbar.set_label("mm/hr")
+                cbar.set_label(r"mm h$^{-1}$")
             elif (timeAccumMin == 5):
-                cbar.set_label("mm/hr equiv.")
+                cbar.set_label(r"mm h$^{-1}$ equiv.")
             else:
                 print('Accum. units not defined.')
                 
@@ -307,7 +311,7 @@ while timeLocal <= timeEnd:
             plt.ylabel('Swiss northing [km]')
             
             txt = str(timeLocal.strftime('%Y-%b-%d %H:%M'))
-            rainAx.text(0.74,0.96,txt,backgroundcolor='white', fontsize=12,transform=rainAx.transAxes)   
+            rainAx.text(0.98,0.98,txt,backgroundcolor='white', fontsize=12,transform=rainAx.transAxes,ha='right',va='top')  
             
             fig.tight_layout()
             
