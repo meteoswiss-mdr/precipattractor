@@ -24,7 +24,7 @@ def get_proj4_ogr(filename):
     src = None
     return(srs.ExportToProj4())
 
-def read_plot_shapefile(fileName, s_srs = None, t_srs = None,  ax = None, linewidth = .5):
+def read_plot_shapefile(fileName, s_srs=None, t_srs=None, ax=None, linewidth=.5, alpha=1.0):
     """
     Function to read, project and plot a shapefile.
     Arguments:
@@ -88,7 +88,7 @@ def read_plot_shapefile(fileName, s_srs = None, t_srs = None,  ax = None, linewi
             par = list(prt) + [pts.shape[0]]
         for pij in xrange(len(prt)): # for every point in the polygon
             ptchs.append(Polygon(pts[par[pij]:par[pij+1]]))
-            ax.add_collection(PatchCollection(ptchs,facecolor='none',edgecolor='k', linewidths=linewidth))
+            ax.add_collection(PatchCollection(ptchs,facecolor='none',edgecolor=(0,0,0,alpha), linewidths=linewidth))
     return(ax)
 
 def gdal_merge_raster(outputFileName,  *inputfileNames):

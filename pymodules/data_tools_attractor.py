@@ -11,12 +11,23 @@ Loris Foresti
 from __future__ import division
 from __future__ import print_function
 
+import os
 import sys
 import math 
 import time 
 import datetime as datetime
+import pandas as pd
+
+from osgeo import gdal, osr, ogr
+import geo
+
 
 import numpy as np
+import matplotlib.pyplot as plt
+
+def linear_rescaling(value, oldmin, oldmax, newmin, newmax):
+    newvalue= (newmax-newmin)/(oldmax-oldmin)*(value-oldmax)+newmax
+    return(newvalue)
 
 #### Functions to converty reflectivity to rainfall and vice-versa
 def to_dB(array, offset=-1):
@@ -144,9 +155,24 @@ def get_variable_indices(subsetVariableNames, listVariableNames):
     return(indices)
 
 def get_reduced_extent(width, height, domainSizeX, domainSizeY):
-    borderSizeX = (width - domainSizeX)/2
-    borderSizeY = (height - domainSizeY)/2
-    extent = (borderSizeX, borderSizeY, width-borderSizeX, height-borderSizeY) # left, upper, right, lower
+    '''
+        Function to get the indices of a central reduced extent of size (domainSizeX, domainSizeY) within a larger 2D array of size (width, height)
+    '''
+
+    if ((width - domainSizeX) % 2) == 0:
+        borderSizeX = (width - domainSizeX)/2
+    else:
+        print('Problem in get_reduced_extent. Non-even border size in X dimension.')
+        sys.exit(1)
+    if ((height - domainSizeY) % 2) == 0:
+        borderSizeY = (height - domainSizeY)/2
+    else:
+        print('Problem in get_reduced_extent. Non-even border size in Y dimension.')
+        sys.exit(1)
+        
+    # extent
+    extent = (int(borderSizeX), int(borderSizeY), int(width-borderSizeX), int(height-borderSizeY)) # left, upper, right, lower
+    
     return(extent)
     
 def extract_middle_domain_img(demImg, domainSizeX, domainSizeY):
@@ -324,7 +350,7 @@ def unique(array):
     uniq, index = np.unique(array, return_index=True)
     return uniq[index.argsort()]
     
-def update_progress(progress,processName = "Progress"):
+def update_progress(progress, processName = "Progress"):
     '''
     update_progress() : Displays or updates a console progress bar
     Accepts a float between 0 and 1. Any int will be converted to a float.
@@ -432,12 +458,49 @@ def divisors(number):
         n += 1
     div = np.array(div)
     return(div)
+
+def contiguous_regions(condition):
+    """Finds contiguous True regions of the boolean array "condition". Returns
+    a 2D array where the first column is the start index of the region and the
+    second column is the end index. Last index is not included (not need to add +1)
+    """
+
+    # Find the indicies of changes in "condition"
+    d = np.diff(condition)
+    idx, = d.nonzero() 
+
+    # We need to start things after the change in "condition". Therefore, 
+    # we'll shift the index by 1 to the right.
+    idx += 1
+
+    if condition[0]:
+        # If the start of condition is True prepend a 0
+        idx = np.r_[0, idx]
+
+    if condition[-1]:
+        # If the end of condition is True, append the length of the array
+        idx = np.r_[idx, condition.size] # Edit
+
+    # Reshape the result into two columns
+    idx.shape = (-1,2)
+    return idx
     
 def fill_attractor_array_nan(arrayStats, timeStamps_datetime, timeSampMin = 5):
+    
+    isStatsArrayNumpy = False
+    isTimesArrayNumpy = False
+    if type(timeStamps_datetime) == np.ndarray:
+        timeStamps_datetime = timeStamps_datetime.tolist()
+        isTimesArrayNumpy = True
+        
+    if type(arrayStats) == np.ndarray:
+        arrayStats = arrayStats.tolist()
+        isStatsArrayNumpy = True
+    
     if len(timeStamps_datetime) == len(arrayStats):
         nrSamples = len(timeStamps_datetime)
     else:
-        print("arrayStats, timeStamps_datetime in fill_attractor_array_nan should have the simze number of rows.")
+        print("arrayStats, timeStamps_datetime in fill_attractor_array_nan should have the same number of rows.")
         sys.exit(1)
     
     # Prepare list of NaNs
@@ -459,9 +522,310 @@ def fill_attractor_array_nan(arrayStats, timeStamps_datetime, timeSampMin = 5):
             arrayStats.insert(t+1,[missingDate] + emptyListNaN)
         t = t+1
         tstart = tstart + datetime.timedelta(minutes = timeSampMin)
+    
+    if isStatsArrayNumpy:
+        arrayStats = np.asarray(arrayStats)
+    if isTimesArrayNumpy:
+        timeStamps_datetime = np.asarray(timeStamps_datetime)
+    
+    return(arrayStats, timeStamps_datetime)
+    
+def fill_attractor_array_nan2(arrayStats, timeStamps_datetime, timeSampMin = 5):
+    '''
+    Attempt to make the previous function faster. Very expensive to convert list of lists to np.ndarray.
+    np.insert even slower...
+    '''
+    if len(timeStamps_datetime) == len(arrayStats):
+        nrSamples = len(timeStamps_datetime)
+    else:
+        print("arrayStats, timeStamps_datetime in fill_attractor_array_nan should have the same number of rows.")
+        sys.exit(1)
+    
+    # Prepare list of NaNs
+    emptyListNaN = np.empty((len(arrayStats[0]))) # without the first column
+    emptyListNaN[:] = np.nan
+    
+    # df = pd.DataFrame(timeStamps_datetime)
+    # df = pd.to_datetime(df)
+    # df = df.resample('D').fillna(0)
+
+    # print(df)
+    # df = df.resample('5T').sum()
+    # print(df)
+    # # df = df.fillna(np.nan)
+    # print(df)
+    # sys.exit()
+    
+    tend = timeStamps_datetime[nrSamples-1]
+    tstart = timeStamps_datetime[0]
+    t = 0
+    while tstart < tend:
+        diffTimeSecs = (timeStamps_datetime[t+1] - timeStamps_datetime[t]).total_seconds()
+        if diffTimeSecs > timeSampMin*60:
+            missingDateTime = timeStamps_datetime[t] + datetime.timedelta(minutes = timeSampMin)
+            # Insert missing date time
+            np.insert(timeStamps_datetime, t+1, missingDateTime, axis=0)
+            # Insert line of NaNs in arrayStats (except date)
+            missingDate = int(missingDateTime.strftime("%Y%m%d%H%M%S"))
+            np.insert(arrayStats, t+1, emptyListNaN, axis=0)
+
+        t = t+1
+        tstart = tstart + datetime.timedelta(minutes = timeSampMin)
+    
     return(arrayStats, timeStamps_datetime)
     
 def print_list_vertical(letters):
     for s1,s2 in zip(letters[:len(letters)//2], letters[len(letters)//2:]): #len(letters)/2 will work with every paired length list
-       print(s1,s2)    
+       print(s1,s2)
+
+def unique_rows(array):
+    new_array = [tuple(row) for row in array]
+    uniques = np.unique(new_array)
+    return(uniques)
     
+def shift2(arr,num):
+    arr=np.roll(arr,num)
+    if num<0:
+         np.put(arr,range(len(arr)+num,len(arr)),np.nan)
+    elif num > 0:
+         np.put(arr,range(num),np.nan)
+    return arr
+    
+def plot_polar_axes_wind(ax2):
+    ax2.set_xticklabels([])
+    ax = plt.gca()
+    gridX,gridY = 10.0,15.0
+    ax.text(0.5,1.025,'N',transform=ax.transAxes,horizontalalignment='center',verticalalignment='bottom',size=25)
+    
+    directionsDegrees = np.array([45, 90, 135, 180, 225, 270, 315])
+    directionsText = np.array(['NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'])
+    
+    for para in np.arange(gridY,360,gridY):
+        x_txt = (1.1*0.5*np.sin(np.deg2rad(para)))+0.5
+        y_txt = (1.1*0.5*np.cos(np.deg2rad(para)))+0.5
+        if para in directionsDegrees:
+            idx = np.where(para == directionsDegrees)[0]
+            if (directionsText[idx[0]] == 'S') | (directionsText[idx[0]] == 'SE') | (directionsText[idx[0]] == 'SW'):
+                y_txt = y_txt - 0.03
+            ax.text(x_txt,y_txt,directionsText[idx[0]],transform=ax.transAxes,horizontalalignment='center',verticalalignment='bottom',size=25)
+        else:
+            ax.text(x_txt,y_txt,u'%i\N{DEGREE SIGN}'%para,transform=ax.transAxes,horizontalalignment='center',verticalalignment='center')
+
+def deg2degN(degrees):
+    degreesN = 90-degrees
+    
+    # Make them all positive (0-360)
+    signIdx = (np.sign(degreesN) == -1)
+    degreesN[signIdx] = 360 + degreesN[signIdx]
+    return degreesN
+    
+def deg2compass(arrayDegrees,stringType='short'):
+    
+    if stringType == 'short':
+        arr=["N","NNE","NE","ENE","E","ESE", "SE", "SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"]
+    elif stringType == 'long':
+        arr=["North","North-northeast","Northeast","East-northeast","East","East-southeast", "Southeast",\
+        "South-southeast","South","South-southwest","Southwest","West-southwest","West","West-northwest","Northwest","North-northwest"]
+    
+    arrayCompass = []
+    for i in range(0,len(arrayDegrees)):
+        val=int((arrayDegrees[i]/22.5)+.5)
+        arrayCompass.append(arr[(val % 16)])
+    
+    if type(arrayDegrees) == np.ndarray:
+        arrayDegrees = np.array(arrayDegrees)
+    return arrayCompass
+
+def create_smart_clevels(minCountLevels=0, maxCountLevels=100):
+    diffMaxMin = maxCountLevels - minCountLevels
+    
+    if (diffMaxMin >= 10000):
+        maxCountLevels = int(maxCountLevels/1000)*1000
+        clevs = np.arange(minCountLevels,maxCountLevels,1000)
+    elif (diffMaxMin >= 5000) & (diffMaxMin < 10000):
+        maxCountLevels = int(maxCountLevels/100)*100
+        clevs = np.arange(minCountLevels,maxCountLevels,500)
+    elif (diffMaxMin >= 2000) & (diffMaxMin < 5000):
+        maxCountLevels = int(maxCountLevels/100)*100
+        clevs = np.arange(minCountLevels,maxCountLevels,250)
+    elif (diffMaxMin >= 1000) & (diffMaxMin < 2000):
+        maxCountLevels = int(maxCountLevels/100)*100
+        clevs = np.arange(minCountLevels,maxCountLevels,100)
+    elif (diffMaxMin >= 500) & (diffMaxMin < 1000):
+        maxCountLevels = int(maxCountLevels/10)*10
+        clevs = np.arange(minCountLevels,maxCountLevels,50)
+    elif (diffMaxMin >= 100) & (diffMaxMin < 500):
+        maxCountLevels = int(maxCountLevels/10)*10
+        clevs = np.arange(minCountLevels,maxCountLevels,25)                
+    else:
+        maxCountLevels = int(maxCountLevels)
+        clevs = np.arange(minCountLevels,maxCountLevels,10)  
+    
+    return(clevs)
+
+import matplotlib as mpl
+def reverse_colourmap(cmap, name = 'my_cmap_r'):
+    """
+    In: 
+    cmap, name 
+    Out:
+    my_cmap_r
+
+    Explanation:
+    t[0] goes from 0 to 1
+    row i:   x  y0  y1 -> t[0] t[1] t[2]
+                   /
+                  /
+    row i+1: x  y0  y1 -> t[n] t[1] t[2]
+
+    so the inverse should do the same:
+    row i+1: x  y1  y0 -> 1-t[0] t[2] t[1]
+                   /
+                  /
+    row i:   x  y1  y0 -> 1-t[n] t[2] t[1]
+    """        
+    reverse = []
+    k = []   
+
+    for key in cmap._segmentdata:    
+        k.append(key)
+        channel = cmap._segmentdata[key]
+        data = []
+
+        for t in channel:                    
+            data.append((1-t[0],t[2],t[1]))            
+        reverse.append(sorted(data))    
+
+    LinearL = dict(zip(k,reverse))
+    my_cmap_r = mpl.colors.LinearSegmentedColormap(name, LinearL) 
+    return my_cmap_r
+
+def get_coordinates_swiss_locations(locations='radars', proj4stringCH=None):
+    proj4stringWGS84 = "+proj=longlat +ellps=WGS84 +nadgrids=@null +no_defs"
+    
+    if proj4stringCH== None:
+        proj4stringCH = "+proj=somerc +lat_0=46.95240555555556 +lon_0=7.439583333333333 \
+        +k_0=1 +x_0=600000 +y_0=200000 +ellps=bessel +towgs84=674.374,15.056,405.346,0,0,0,0 +units=m +no_defs" 
+
+    s_srs = geo.get_proj4_projection(proj4stringWGS84)
+    t_srs = geo.get_proj4_projection(proj4stringCH)
+    ct = osr.CoordinateTransformation(s_srs,t_srs)
+    #p1 = pyproj.Proj(proj4stringWGS84)
+    #p2 = pyproj.Proj(t_srs)
+    
+    if locations == 'radars':
+        coordinates = [
+        ('LEM', 46.04, 8.83),
+        ('DOL', 46.43, 6.10),
+        ('ALB', 47.29, 8.51),
+        ('PPM', 46.370833, 7.486944),
+        ('WEI', 46.835258, 9.794108)
+        ]
+    elif locations == 'cities':
+        coordinates = [
+        # ('Lugano', 46.003678, 8.951052),
+        ('Milan', 45.458626,9.181872999999996),
+        ('Zurich', 47.3768866,8.541694),
+        ('Bern', 46.9479739,7.447446799999966),
+        ('Basel', 47.55959860000001,7.588576099999955),
+        ('Geneva',46.2043907,6.143157699999961),
+        ('Lucerne', 47.050354, 8.304885),
+        ('Aosta', 45.736374, 7.315577),
+        ('Gotthard', 46.559302, 8.561800),
+        # ('Grenoble', 45.189712, 5.723413),
+        # ('Chambery', 45.573669, 5.927933),
+        # ('Lyon', 45.751703, 4.838691),
+        ('Constanz',47.670897, 9.173335),
+        ('Besancon', 47.238605, 6.024600),
+        ('Dijon', 47.322436, 5.038421),
+        # ('Domodossola', 46.111880, 8.298555),
+        ('Locarno', 46.169088, 8.786945),
+        ('Varese', 45.820100, 8.824963),
+        ('Bergamo', 45.699911, 9.677642),
+        # ('Brescia',45.540414, 10.218764),
+        ('Lausanne', 46.519610, 6.628720),
+        ('Ivrea',45.466663, 7.881943),
+        ('St Moritz',46.490273, 9.833650),
+        # ('Verbania', 45.928402, 8.555404),
+        ('Turin', 45.068369, 7.678724),
+        ('Genoa',44.406567, 8.947670),
+        ('Lyon',45.765961, 4.832295),
+        ('Strasbourg', 48.576825, 7.751060),
+        ('Stuttgart', 48.778949, 9.182309)
+        ]
+    elif locations == 'regions':
+        # 4th column is rotation
+        coordinates = [
+        ('Berner Prealps', 46.644444, 7.641923),
+        ('Glarner Prealps', 47.027443, 9.066961),
+        ('Ticino', 46.347581, 8.732543 ),
+        ('Plateau', 47.150606, 7.985627),
+        ('Berner \n Jura', 47.188765, 7.163854),
+        ('Jura \n Vaudois', 46.633969, 6.315448),
+        ('Central \n Alps', 46.631409, 8.383590),
+        ('Vosges', 48.022662, 6.885191),
+        ('Black Forest', 47.877341, 8.023283),
+        ('Savoy', 45.515406, 6.419615),
+        ('Upper Savoy', 46.058678, 6.386667),
+        ('Simplon', 46.251999, 8.030979),
+        ('L. Magg.', 45.980404, 8.653914),
+        ('Orobie Alps', 45.993991, 9.734690),
+        ('Grisons', 46.697617, 9.633758),
+        ('Valais', 46.193337, 7.466644),
+        ('FRANCE', 47.001804, 5.424870),
+        ('ITALY', 45.639623, 8.504649),
+        ('AUSTRIA', 47.232686, 9.923111),
+        ('GERMANY',48.008381, 9.363776)
+        ]
+    else:
+        print('Possible values for locations=radars,regions,cities.')
+        sys.exit()
+    
+    # Collect and project locations
+    labels = []
+    locx = []
+    locy = []
+    for p in range(0,len(coordinates)):
+        lat = coordinates[p][1]
+        lon = coordinates[p][2]
+        #x,y = pyproj.transform(p1, p2, lon, lat)
+        temp = np.zeros((1,3))
+        temp[0,0] = lon
+        temp[0,1] = lat
+        temp2 = ct.TransformPoints(temp)
+        locx.append(temp2[0][0])
+        locy.append(temp2[0][1])
+        labels.append(coordinates[p][0])
+	
+    return locx, locy, labels 
+
+def draw_radars(ax, fontsize=10, marker='^', markersize=15, color='r', only_location=False):
+    # Draw location of radars
+    loc_x, loc_y, loc_l = get_coordinates_swiss_locations(locations='radars')
+
+    ax.scatter(loc_x, loc_y, c=color, marker=marker, s=markersize) # radars
+    
+    if only_location == False:
+        for label, x, y in zip(loc_l, loc_x, loc_y):
+            ax.annotate(label, xy=(x,y), xytext=(7,-2), textcoords = 'offset points', fontsize=fontsize, bbox=dict(boxstyle="square", fc="w"),)
+
+def draw_cities(ax, fontsize=10, marker='o', markersize=5, color='k'):
+    # Draw location of major cities
+    loc_x, loc_y, loc_l = get_coordinates_swiss_locations(locations='cities')
+    
+    ax.scatter(loc_x, loc_y, c=color, marker=marker, s=markersize)
+    for label, x, y in zip(loc_l, loc_x, loc_y):
+        ax.annotate(label, xy = (x, y), xytext = (7, -2), textcoords = 'offset points',fontsize=fontsize)
+
+def draw_regions(ax, fontsize=11, color='r'):        
+    # Draw location of regions
+    loc_x, loc_y, loc_l = get_coordinates_swiss_locations(locations='regions')
+    
+    for label, x, y in zip(loc_l, loc_x, loc_y):
+        if (label == 'Berner Prealps') or (label == 'Glarner Prealps') or (label == 'Plateau') or (label == 'Berner \n Jura') or (label == 'Jura \n Vaudois'):
+            rotation = 30
+        elif (label == 'L. Magg.'):
+            rotation = 60
+        else:
+            rotation = 0
+        ax.annotate(label, xy = (x, y), xytext = (0, 0), rotation=rotation, ha='center', va='center', textcoords = 'offset points',fontsize=fontsize)

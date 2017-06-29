@@ -285,13 +285,17 @@ def compute_fft_anisotropy(psd2d, fftSizeSub = -1, percentileZero = -1, rotation
     if fftSizeSub == -1:
         fftSizeSub = psd2d.shape[0]/2
     
+    if type(fftSizeSub) == 'float':
+        fftSizeSub = int(fftSizeSub)
+    
     fftSize = psd2d.shape
     
     if ((fftSize[0] % 2) != 0) or ((fftSize[1] % 2) != 0):
         print("Error in compute_fft_anisotropy: please provide an even sized 2d FFT spectrum.")
         sys.exit(1)
-    fftMiddleX = fftSize[1]/2
-    fftMiddleY = fftSize[0]/2
+    
+    fftMiddleX = int(fftSize[1]/2)
+    fftMiddleY = int(fftSize[0]/2)
     
     # Select subset of autocorrelation/spectrum
     psd2dsub = psd2d[fftMiddleY-fftSizeSub:fftMiddleY+fftSizeSub,fftMiddleX-fftSizeSub:fftMiddleX+fftSizeSub]
@@ -346,7 +350,7 @@ def compute_fft_anisotropy(psd2d, fftSizeSub = -1, percentileZero = -1, rotation
     labelsImage = measure.label(psd2dsubSmoothShifted_bin, background = 0)
     
     # Get label of center of autocorrelation function (corr = 1.0)
-    labelCenter = labelsImage[labelsImage.shape[0]/2,labelsImage.shape[1]/2]
+    labelCenter = labelsImage[int(labelsImage.shape[0]/2),int(labelsImage.shape[1]/2)]
     
     # Compute mask to keep only central polygon
     mask = (labelsImage == labelCenter).astype(int)
@@ -367,7 +371,7 @@ def compute_fft_anisotropy(psd2d, fftSizeSub = -1, percentileZero = -1, rotation
     idxMax = np.argmin(eigvals)
     #eccentricity = np.max(np.sqrt(eigvals))/np.min(np.sqrt(eigvals))
     eccentricity = math.sqrt(1-np.min(eigvals)/np.max(eigvals))
-    orientation = np.degrees(math.atan(eigvecs[0,idxMax]/eigvecs[1,idxMax]))
+    orientation = np.degrees(math.atan(eigvecs[0,idxMax]/eigvecs[1,idxMax])) # atan or atan2?
         
     return psd2dsub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs, percZero, psd2dsubSmooth
 
@@ -442,6 +446,7 @@ def compute_autocorrelation_fft(timeSeries, FFTmod = 'NUMPY'):
     # Compute field mean and variance
     field_mean = np.mean(timeSeries)
     field_var = np.var(timeSeries)
+    
     nr_samples = len(timeSeries)
     
     # Compute FFT
@@ -467,21 +472,35 @@ def compute_autocorrelation_fft(timeSeries, FFTmod = 'NUMPY'):
     autocorrelation = autocovariance.real/field_var
     
     # Take only first half (the autocorrelation and spectrum are symmetric)
-    autocorrelation = autocorrelation[0:nr_samples/2]
-    powerSpectrum = powerSpectrum[0:nr_samples/2]
+    autocorrelation = autocorrelation[0:int(nr_samples/2)]
+    powerSpectrum = powerSpectrum[0:int(nr_samples/2)]
     
+    if (nr_samples % 2) != 0:
+        print('Beware that it is better to pass an even number of samples for FFT to compute_autocorrelation_fft.')
+        
     toc = time.clock()
     #print("Elapsed time for ACF using FFT: ", toc-tic, " seconds.")
     return(autocorrelation, powerSpectrum)
 
 def time_delay_embedding(timeSeries, nrSteps=1, stepSize=1, noData=np.nan):
+    '''
+    This function takes an input time series and gives an ndarray of delayed vectors.
+    nrSteps=1 will simple give back the same time series.
+    nrSteps=2 will give back the time series and as second column the delayed time series by stepsSize
+    '''
+    
     timeSeries = np.array(timeSeries)
+    if nrSteps == 1:
+        timeSeries = timeSeries.reshape(len(timeSeries),1)
+        return(timeSeries)
     
     nrSamples = len(timeSeries)
-    delayedArray = np.ones((nrSamples,nrSteps+1))*noData
+    delayedArray = np.ones((nrSamples,nrSteps))*noData
+    
+    # Put lag0 time series in the first column
     delayedArray[:,0] = timeSeries
     
-    for i in range(1,nrSteps+1):
+    for i in range(0,nrSteps):
         # Generate nodata to append to the delayed time series
         if i*stepSize <= nrSamples:
             timeSeriesNoData = noData*np.ones(i*stepSize)
@@ -498,10 +517,19 @@ def time_delay_embedding(timeSeries, nrSteps=1, stepSize=1, noData=np.nan):
         
 def correlation_dimension(dataArray, nrSteps=100, Lnorm=2, plot=False):
     '''
-    Function to estimate the correlation dimension
+    Function to estimate the correlation dimension (Grassberger-Procaccia algorithm)
     '''
+    
     nr_samples = dataArray.shape[0]
     nr_dimensions = dataArray.shape[1]
+    
+    if nr_samples < 10:
+        print('Not enough samples to estimate fractal dimension.')
+        radii = []
+        Cr = []
+        fractalDim = np.nan
+        intercept = np.nan
+        return(radii, Cr, fractalDim, intercept)
     
     # Compute the L_p norm between all pairs of points in the high dimensional space
     # Correlation dimension requires the computation of the L1 norm (p=1), i.e. |Xi-Xj|
@@ -561,6 +589,7 @@ def correlation_dimension(dataArray, nrSteps=100, Lnorm=2, plot=False):
         nrPointsFitting = 20
         startIdx = 0
         maxSlope = 0.0
+        maxIntercept = -9999
         while startIdx < (len(radii) - nrPointsFitting):
             subsetIdxFitting = np.arange(startIdx, startIdx+nrPointsFitting)
             reg = sp.polyfit(logRadii[subsetIdxFitting], logCr[subsetIdxFitting], 1)

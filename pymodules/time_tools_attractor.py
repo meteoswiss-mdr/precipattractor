@@ -16,6 +16,9 @@ import numpy as np
 import time
 import sys
 
+fmt1 = "%.1f"
+fmt2 = "%.2f"
+
 def timestring2datetime(timestring):
     '''
     Function to convert a time stamp string YYYYmmDDHHMMSS to a datetime object.
@@ -51,9 +54,9 @@ def datetime2timestring(timeDate):
     timeString = timeDate.strftime("%Y%m%d%H%M%S")
     return(timeString)
     
-def datetime2juliantimestring(timeDate):
+def datetime2juliantimestring(timeDate, format='YYYYJJJHHMM'):
     '''
-    Function to convert datetime object to a Julian time stamp string YYYYJJJHHMMSS.
+    Function to convert datetime object to a Julian time stamp string YYYYJJJHHMM.
     
     Parameters
     ----------
@@ -63,14 +66,17 @@ def datetime2juliantimestring(timeDate):
     Returns
     -------
     timeString: str
-        Time string YYYYJJJHHMMSS
+        Time string YYYYJJJHHMM
     '''
     year, yearStr, julianDay, julianDayStr = parse_datetime(timeDate)
     hour = timeDate.hour
     minute = timeDate.minute
     hourminStr = ('%02i' % hour) + ('%02i' % minute)
-    
-    timeString = yearStr + julianDayStr + hourminStr
+    if format == 'YYYYJJJHHMM':
+        timeString = yearStr + julianDayStr + hourminStr
+    if format == 'YYJJJHHMM':
+        timeString = yearStr[2:4] + julianDayStr + hourminStr
+        
     return(timeString)
     
 def juliantimestring2datetime(timeString, format='YYJJJHHMM'): 
@@ -123,7 +129,52 @@ def juliantimestring2datetime(timeString, format='YYJJJHHMM'):
         sys.exit(1)
 
     return(timeDate)   
- 
+
+def juliantimestring2datetime_array(timeStampJulianArray, format='YYJJJHHMM', timeString=True):
+    '''
+    Same as above but for a list or array of time stamps.
+    '''
+    nrSamples = len(timeStampJulianArray)
+    
+    # If not many samples...
+    if nrSamples < 1000000:
+        timeStampJulianArrayStr = np.array(map(lambda n: "%0.9i"%n, timeStampJulianArray))
+        timeStampJulianArrayDt = map(juliantimestring2datetime, timeStampJulianArrayStr)
+        if timeString == True:
+            timeStampArrayStr = map(datetime2timestring, timeStampJulianArrayDt)
+        else:
+            timeStampArrayStr = []
+        return(timeStampJulianArrayDt, timeStampArrayStr)
+    
+    else:
+        # If a lot of samples
+        timeStampJulianSet = np.unique(timeStampJulianArray)
+        
+        nrUniqueSamples = len(timeStampJulianSet)
+        print(nrSamples, nrUniqueSamples)
+        
+        timeStampDt = np.empty((nrSamples,), dtype='datetime64[m]')
+        timeStampStr = np.empty((nrSamples,), dtype='S12')
+        
+        # Do the operations over the unique time stamps
+        for i in range(0,nrUniqueSamples):
+            timeStampJulianStr = "%0.9i"% timeStampJulianSet[i]
+            dt = juliantimestring2datetime(timeStampJulianStr, format=format)
+            
+            bool = (timeStampJulianArray == timeStampJulianSet[i])
+            
+            # Set values in array
+            timeStampDt[bool] = dt
+            if timeString == True:
+                dtStr = datetime2timestring(dt)
+                timeStampStr[bool] = dtStr
+
+            # Print out advancement (for large arrays)    
+            if ((i % 100) == 0):
+                print(fmt1 % (i/nrUniqueSamples*100),"%")
+            
+        return(timeStampDt, timeStampStr)   
+    
 def get_julianday(timeDate):
     '''
     Get Julian day from datetime object.
@@ -308,3 +359,16 @@ def sample_independent_times(timeStampsDt, indepTimeHours=6, method='start'):
     indepTimeStampsDt = np.array(indepTimeStampsDt)
     
     return(indepTimeStampsDt, indepIndices)
+
+def generate_datetime_list(startDt, endDt, stepMin=5):
+    '''
+    Generate a list of datetimes from start to end (included).
+    '''
+    localTime = startDt
+    listDt = []
+    while localTime <= endDt:
+        listDt.append(localTime)
+        localTime = localTime + datetime.timedelta(minutes=stepMin)
+        
+    return(listDt)
+        

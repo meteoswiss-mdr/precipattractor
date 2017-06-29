@@ -100,6 +100,7 @@ if spreadMeasure != 'std' and spreadMeasure != 'scatter':
 if spreadMeasure == 'std':
     txtYlabel = 'Normalized st. deviation'
 if spreadMeasure == 'scatter':
+    txtYlabel = 'Normalized robust spread'
     txtYlabel = 'Normalized half scatter'
     
 ############### OPEN FILES WITH STATS

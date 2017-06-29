@@ -37,13 +37,65 @@ class Radar_object(object):
     
     # Radar stats
     war = -1
+    fileName = ''
 
-def read_gif_image(timeStartStr, product='AQC', minR = 0.08, fftDomainSize = 512, resKm = 1, timeAccumMin = 5,\
-    inBaseDir = '/scratch/lforesti/data/', noData = -999.0, cmaptype = 'MeteoSwiss', domain = 'CCS4'):
+def get_filename_radar(timeStr, inBaseDir='/scratch/lforesti/data/', product='AQC', timeAccumMin=5):
+    '''
+    Get name of radar file given a time string, product and temporal resolution
+    '''
     
     # time parameters
     timeAccumMinStr = '%05i' % timeAccumMin
-    timeAccum24hStr = '%05i' % (24*60)
+    
+    # timestamp
+    timeLocal = ti.timestring2datetime(timeStr)
+    year, yearStr, julianDay, julianDayStr = ti.parse_datetime(timeLocal)
+    hour = timeLocal.hour
+    minute = timeLocal.minute
+
+    # Create filename for input
+    hourminStr = ('%02i' % hour) + ('%02i' % minute)
+    radarOperWildCard = '?'
+    subDir = str(year) + '/' + yearStr + julianDayStr + '/'
+    inDir = inBaseDir + subDir
+    fileNameWildCard = inDir + product + yearStr + julianDayStr + hourminStr + radarOperWildCard + '_' + timeAccumMinStr + '*.gif'
+
+    # Get filename matching regular expression
+    fileName = get_filename_matching_regexpr(fileNameWildCard)
+    
+    return(fileName, yearStr, julianDayStr, hourminStr)
+
+def get_filename_matching_regexpr(fileNameWildCard):
+    inDir = os.path.dirname(fileNameWildCard)
+    baseNameWildCard = os.path.basename(fileNameWildCard)
+
+    # Check if directory exists
+    if os.path.isdir(inDir) == False:
+        print('Directory: ' + inDir + ' does not exists.')
+        fileName = 'none'
+        return(fileName)
+    
+    # If it does, check for files matching regular expression
+    listFiles = os.listdir(inDir)
+    if len(listFiles) > 0:
+        for file in listFiles:
+            if fnmatch.fnmatch(file, baseNameWildCard) == True:
+                fileNameRel = file
+                # Get absolute filename
+                if inDir[len(inDir)-1] == '/':
+                    fileName = inDir + fileNameRel
+                else:
+                    fileName = inDir + '/' + fileNameRel
+                break
+            else:
+                fileName = 'none'
+    else:
+        fileName = 'none'
+        
+    return(fileName)
+    
+def read_gif_image(timeStr, product='AQC', minR = 0.08, fftDomainSize = 512, resKm = 1, timeAccumMin = 5,\
+    inBaseDir = '/scratch/lforesti/data/', noData = -999.0, cmaptype = 'MeteoSwiss', domain = 'CCS4'):
     
     # Limits of spatial domain
     if domain == 'CCS4':
@@ -65,22 +117,9 @@ def read_gif_image(timeStartStr, product='AQC', minR = 0.08, fftDomainSize = 512
     cmap.set_over('black',1)
     cmapMask = colors.ListedColormap(['black'])
     
-    # timestamp
-    timeStart = ti.timestring2datetime(timeStartStr)
-    timeLocal = timeStart
-    year, yearStr, julianDay, julianDayStr = ti.parse_datetime(timeLocal)
-    hour = timeLocal.hour
-    minute = timeLocal.minute
-
-    # Create filename for input
-    hourminStr = ('%02i' % hour) + ('%02i' % minute)
-    radarOperWildCard = '?'
-    subDir = str(year) + '/' + yearStr + julianDayStr + '/'
-    inDir = inBaseDir + subDir
-    fileNameWildCard = inDir + product + yearStr + julianDayStr + hourminStr + radarOperWildCard + '_' + timeAccumMinStr + '*.gif'
-
-    # Get filename matching regular expression
-    fileName = get_filename_matching_regexpr(fileNameWildCard)
+    # Get filename
+    fileName, yearStr, julianDayStr, hourminStr = get_filename_radar(timeStr, inBaseDir, product, timeAccumMin)
+    timeLocal = ti.timestring2datetime(timeStr)
     
     # Get data quality from fileName
     dataQuality = get_quality_fromfilename(fileName)
@@ -88,21 +127,21 @@ def read_gif_image(timeStartStr, product='AQC', minR = 0.08, fftDomainSize = 512
     # Check if file exists
     isFile = os.path.isfile(fileName)
     if (isFile == False):
-        print('File: ', fileNameWildCard, ' not found.')
+        print('File: ', fileName, ' not found.')
         radar_object = Radar_object()  
     else:
         # Reading GIF file
-        print('Reading: ', fileName)
+        #print('Reading: ', fileName)
         try:
             # Open GIF image
             rain8bit, nrRows, nrCols = open_gif_image(fileName)
             
             # Get GIF image metadata
-            alb, doe, mle, ppm, wei = get_gif_radar_operation(fileName)
+            alb, dol, lem, ppm, wei = get_gif_radar_operation(fileName)
             
             # If metadata are not written in gif file derive them from the quality number in the filename
-            if (alb == -1) & (doe == -1) & (mle == -1) & (ppm == -1) & (wei == -1):
-                alb, doe, mle = get_radaroperation_from_quality(dataQuality)
+            if (alb == -1) & (dol == -1) & (lem == -1) & (ppm == -1) & (wei == -1):
+                alb, dol, lem = get_radaroperation_from_quality(dataQuality)
 
             # Generate lookup table
             lut = dt.get_rainfall_lookuptable(noData)
@@ -120,7 +159,7 @@ def read_gif_image(timeStartStr, product='AQC', minR = 0.08, fftDomainSize = 512
                 Ymin = allYcoords[extent[1]]
                 Xmax = allXcoords[extent[2]]
                 Ymax = allYcoords[extent[3]]
-            
+
             subXcoords = np.arange(Xmin,Xmax,resKm*1000)
             subYcoords = np.arange(Ymin,Ymax,resKm*1000)
             
@@ -191,8 +230,8 @@ def read_gif_image(timeStartStr, product='AQC', minR = 0.08, fftDomainSize = 512
             radar_object.war = war
             
             # time stamps
-            radar_object.datetime = timeStart
-            radar_object.datetimeStr = timeStartStr
+            radar_object.datetime = timeLocal
+            radar_object.datetimeStr = timeStr
             radar_object.hourminStr = hourminStr
             radar_object.yearStr = yearStr
             radar_object.julianDayStr = julianDayStr
@@ -202,8 +241,8 @@ def read_gif_image(timeStartStr, product='AQC', minR = 0.08, fftDomainSize = 512
             radar_object.dbzThreshold = dbzThreshold
             radar_object.rainThreshold = rainThreshold
             radar_object.alb = alb
-            radar_object.doe = doe
-            radar_object.mle = mle
+            radar_object.dol = dol
+            radar_object.lem = lem
             radar_object.ppm = ppm
             radar_object.wei = wei
             radar_object.dataQuality = dataQuality
@@ -364,21 +403,49 @@ def get_filename(inBaseDir, analysisType, timeDate, varNames, varValues, product
     fileName = os.path.basename(fullName)
 
     return(fullName, dirName, fileName)
+
+def read_csv(fileName, header=True):
+    '''
+    Function to read a CSV file containing an array of data into a list of lists.
+    If the file contains a header for the variable names use header=True.
+    If it contains only the data use header=False
+    '''
+    with open(fileName, 'r') as csvfile:
+        spamreader = csv.reader(csvfile, delimiter=',', quotechar='|')
+        arrayData = list(spamreader)
     
-def write_csv(fileName, headers, dataArray):
+    # Prepare output
+    if header == True:
+        header = arrayData[0]
+        arrayData = np.array(arrayData[1:])
+        return(arrayData, header)
+    else:
+        return(arrayData)
+    
+def write_csv(fileName, dataArray, header=[]):
+    '''
+    Function to write a CSV file containing an array of data.
+    You have the option to pass a header with variable names.
+    '''
     f = open(fileName, 'w')
     csvOut = csv.writer(f)
-
-    csvOut.writerow(headers)
-    csvOut.writerows(dataArray)
-    f.close()
-
-def write_csv_matrix(fileName, dataArray):
-    f = open(fileName, 'w')
-    csvOut = csv.writer(f)
     
-    csvOut.writerows(dataArray)
+    # fmtArray = ["%i","%.3f"]
+    # for c in range(0, len(fmtArray)):
+        # dataArray[:,c] = map(lambda n: fmtArray[c] % n, dataArray[:,c])
+    
+    if len(header) != 0:
+        csvOut.writerow(header)
+    if len(dataArray[0]) > 1:
+        csvOut.writerows(dataArray)
+    else:
+        for val in dataArray:
+            csvOut.writerow([val])
     f.close()
+
+def write_singlecol(fileName, dataArray):
+    f = open(fileName, 'w')
+    f.writelines([ret + '\n' for ret in dataArray])    
 
 # Read-in list of CSV or NETCDF files containing radar rainfall statistics
 def csv_list2array(timeStart, timeEnd, inBaseDir, analysisType='STATS', product='AQC', quality=0, timeAccumMin=5, minR=0.08, wols=0, variableBreak=0):
@@ -497,7 +564,7 @@ def write_netcdf_globalstats(fileName, headers, dataArray, lowRainThreshold, boo
         varName = headers[var+1]
         
         # Create variable
-        if (varName == 'alb') | (varName == 'doe') | (varName == 'mle') |(varName == 'ppm') | (varName == 'wei'):
+        if (varName == 'alb') | (varName == 'dol') | (varName == 'lem') |(varName == 'ppm') | (varName == 'wei'):
             nc_var = nc_fid.createVariable(varName, 'i1', dimensions=('time',))
         else:
             nc_var = nc_fid.createVariable(varName, 'f4', dimensions=('time',))
@@ -508,9 +575,9 @@ def write_netcdf_globalstats(fileName, headers, dataArray, lowRainThreshold, boo
         # Write radar attributes
         if varName == 'alb':
             nc_var.description = "Number of valid fields from Albis radar (-1: not active, 0: not in operation, 1: ok, 12: correct hourly accumulation)."
-        if varName == 'doe':
+        if varName == 'dol':
             nc_var.description = "Number of valid fields from Dole radar"
-        if varName == 'mle':
+        if varName == 'lem':
             nc_var.description = "Number of valid fields from Lema radar"
         if varName == 'ppm':
             nc_var.description = "Number of valid fields from Plaine Morte radar"
@@ -908,49 +975,6 @@ def get_files_period(timeStart, timeEnd, inBaseDir, fileNameExpr, tempResMin = 5
         # Update time
         timeLocal = timeLocal + datetime.timedelta(minutes = tempResMin)
     return(fileList)
-    
-def read_csv_array(fileName):
-    listStats = []
-    with open(fileName, 'r') as csvfile:
-        spamreader = csv.reader(csvfile, delimiter=',', quotechar='|')
-        for row in spamreader:
-            rowFmt = np.array(row)
-            rowFmt = rowFmt.reshape(1,rowFmt.shape[0])
-            #print(rowFmt,rowFmt.shape)
-            listStats.append(rowFmt)
-    arrayStats = np.array(listStats)
-    print(arrayStats[0])
-    
-    return(arrayStats)
-
-def get_filename_matching_regexpr(fileNameWildCard):
-    inDir = os.path.dirname(fileNameWildCard)
-    baseNameWildCard = os.path.basename(fileNameWildCard)
-
-    # Check if directory exists
-    if os.path.isdir(inDir) == False:
-        print('Directory: ' + inDir + ' does not exists.')
-        fileName = 'none'
-        return(fileName)
-    
-    # If it does, check for files matching regular expression
-    listFiles = os.listdir(inDir)
-    if len(listFiles) > 0:
-        for file in listFiles:
-            if fnmatch.fnmatch(file, baseNameWildCard) == True:
-                fileNameRel = file
-                # Get absolute filename
-                if inDir[len(inDir)-1] == '/':
-                    fileName = inDir + fileNameRel
-                else:
-                    fileName = inDir + '/' + fileNameRel
-                break
-            else:
-                fileName = 'none'
-    else:
-        fileName = 'none'
-        
-    return(fileName)
         
 def open_gif_image(fileName):
     '''
@@ -980,70 +1004,6 @@ def open_gif_image(fileName):
     
     return(rain8bit, nrRows, nrCols)
    
-def get_gif_radar_operation(fileName):
-    '''
-    Function to read the metadata of a radar composite gif file and get the quality of the different radars.
-    
-    Parameters
-    ----------
-    fileName : str
-    
-    Returns
-    -------
-    alb: int
-        Quality of the Albis radar data (number of valid fields in the accumulation)
-    doe: int
-        Quality of the Dole radar data
-    mle: int
-        Quality of the Lema radar data
-    ppm: int
-        Quality of the Plaine Morte radar data
-    wei: int
-        Quality of the Weissfluhgipfel radar data
-    
-    '''
-
-    # Default values for period before radar installation
-    alb = -1
-    doe = -1
-    mle = -1
-    ppm = -1
-    wei = -1
-    
-    try:
-        # Use ImageMagick identify command to grep the line with the radar operations
-        cmd = 'identify -format "%c" ' + fileName + ' | grep ALB'
-        outString = subprocess.check_output(cmd, shell=True)
-        
-        # Parse output string
-        outStringArray = outString.split(' ')
-        
-        # Get data quality integer for each radar
-        for radar in range(0,len(outStringArray)):
-            radarString = outStringArray[radar].split('=')
-            if radarString[0] == 'ALB':
-                alb = int(radarString[1])
-            if (radarString[0] == 'DOE') | (radarString[0] == 'DOL'):
-                doe = int(radarString[1])
-            if (radarString[0] == 'MLE') | (radarString[0] == 'LEM'):
-                mle = int(radarString[1])
-            if radarString[0] == 'PPM':
-                ppm = int(radarString[1])
-            if radarString[0] == 'WEI':
-                wei = int(radarString[1])
-    except:
-        print('ALB activity not readable from ', fileName)
-        print('Use the data quality from file name instead')
-        
-        # Default values if nothing is found in gif file
-        alb = -1
-        doe = -1
-        mle = -1
-        ppm = -1
-        wei = -1
-
-    return(alb, doe, mle, ppm, wei)
-
 def get_quality_fromfilename(fileName):
     '''
     Function to parse a filname to get the one digit number or letter describing the quality of the radar composite.
@@ -1075,47 +1035,199 @@ def get_radaroperation_from_quality(quality):
     -------
     alb: int
         Quality of the Albis radar data (1 or 0)
-    doe: int
+    dol: int
         Quality of the Dole radar data (1 or 0)
-    mle: int
+    lem: int
         Quality of the Lema radar data (1 or 0)
     '''
     quality = int(quality)
     
     # binary codes for radars
     alb_bin = '1'
-    doe_bin = '10'
-    mle_bin = '100'
+    dol_bin = '10'
+    lem_bin = '100'
     
     # decimal codes for radars
     alb_dec = int(alb_bin,2)
-    doe_dec = int(doe_bin,2)
-    mle_dec = int(mle_bin,2)
+    dol_dec = int(dol_bin,2)
+    lem_dec = int(lem_bin,2)
     
     # quality of each individual radar
     alb = -1
-    doe = -1
-    mle = -1
+    dol = -1
+    lem = -1
 
     if alb_dec == quality:
         alb = 1
-    elif doe_dec == quality:
-        doe = 1
-    elif mle_dec == quality:
-        mle = 1
-    elif (alb_dec + doe_dec) == quality:
+    elif dol_dec == quality:
+        dol = 1
+    elif lem_dec == quality:
+        lem = 1
+    elif (alb_dec + dol_dec) == quality:
         alb = 1
-        doe = 1
-    elif (alb_dec + mle_dec) == quality:
+        dol = 1
+    elif (alb_dec + lem_dec) == quality:
         alb = 1
-        mle = 1
-    elif (doe_dec + mle_dec) == quality:
-        doe = 1
-        mle = 1
-    elif (alb_dec + doe_dec + mle_dec) == quality:
+        lem = 1
+    elif (dol_dec + lem_dec) == quality:
+        dol = 1
+        lem = 1
+    elif (alb_dec + dol_dec + lem_dec) == quality:
         alb = 1
-        doe = 1
-        mle = 1
+        dol = 1
+        lem = 1
     
-    print(quality, '->', 'ALB=', alb, 'DOE=', doe, 'MLE=', mle)
-    return(alb,doe,mle)
+    print(quality, '->', 'ALB=', alb, 'DOL=', dol, 'LEM=', lem)
+    return(alb,dol,lem)
+
+def get_radaroperation_from_quality_4gen(quality):
+    '''
+    Function to convert a one digit quality number into the activity of the five 4th gen. radars.
+    
+    Parameters
+    ----------
+    quality : str, int
+        One digit quality number (extracted from the filename, e.g. 7)
+    
+    Returns
+    -------
+    alb: int
+        Quality of the Albis radar data (1 or 0)
+    dol: int
+        Quality of the Dole radar data (1 or 0)
+    lem: int
+        Quality of the Lema radar data (1 or 0)
+    ppm: int
+        Quality of the PlaineMorte radar data (1 or 0)
+    wei: int
+        Quality of the Weissfluhgipfel radar data (1 or 0)
+    '''
+    alb,dol,lem,ppm,wei = -1,-1,-1,-1,-1
+    
+    characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' # English
+    #characters = 'ABCDEFGHILMNOPQRSTUVZ' # Italian
+    indices = np.arange(0,len(characters))
+    
+    try:
+        qualitySum = int(quality)
+    except:
+        idxCharacter = characters.find(quality)+1  
+        qualitySum = 9 + idxCharacter
+        # print(quality, idxCharacter, qualitySum)
+    
+    # binary codes for radars
+    alb_bin = '1'
+    dol_bin = '10'
+    lem_bin = '100'
+    ppm_bin = '1000'
+    wei_bin = '10000'
+    
+    # decimal codes for radars
+    alb_dec = int(alb_bin,2)
+    dol_dec = int(dol_bin,2)
+    lem_dec = int(lem_bin,2)
+    ppm_dec = int(ppm_bin,2)
+    wei_dec = int(wei_bin,2)
+    
+    # Loop over the various combinations... so much fun
+    arrayDec = [alb_dec, dol_dec, lem_dec, ppm_dec, wei_dec]
+    
+    combinations = find_sum_in_list(arrayDec, qualitySum)
+    for i in range(0,len(combinations)):
+        if combinations[i] == alb_dec:
+            alb = 1
+        if combinations[i] == dol_dec:
+            dol = 1
+        if combinations[i] == lem_dec:
+            lem = 1
+        if combinations[i] == ppm_dec:
+            ppm = 1
+        if combinations[i] == wei_dec:
+            wei = 1
+    
+    return(alb,dol,lem,ppm,wei)
+
+from itertools import combinations      
+def find_sum_in_list(numbers, target):
+    # Check particular case where you sum up all the numbers
+    if np.sum(numbers) == target:
+        return(numbers)
+    
+    # Check all other cases
+    results = []
+    for x in range(len(numbers)):
+        for combo in combinations(numbers, x):
+            if sum(combo) == target:
+                results.append(list(combo))
+    
+    # Extract first combination found or issue error if nothing found
+    if len(results) != 0:
+        results = results[0]
+    else:
+        print('Impossible to find a combination of ', numbers,' to sum up to', target)
+        sys.exit(1)
+    return(results)
+        
+def get_gif_radar_operation(fileName):
+    '''
+    Function to read the metadata of a radar composite gif file and get the quality of the different radars.
+    
+    Parameters
+    ----------
+    fileName : str
+    
+    Returns
+    -------
+    alb: int
+        Quality of the Albis radar data (number of valid fields in the accumulation)
+    dol: int
+        Quality of the Dole radar data
+    lem: int
+        Quality of the Lema radar data
+    ppm: int
+        Quality of the Plaine Morte radar data
+    wei: int
+        Quality of the Weissfluhgipfel radar data
+    
+    '''
+
+    # Default values for period before radar installation
+    alb = -1
+    dol = -1
+    lem = -1
+    ppm = -1
+    wei = -1
+    
+    try:
+        # Use ImageMagick identify command to grep the line with the radar operations
+        cmd = 'identify -format "%c" ' + fileName + ' | grep ALB'
+        outString = subprocess.check_output(cmd, shell=True)
+        
+        # Parse output string
+        outStringArray = outString.split(' ')
+        
+        # Get data quality integer for each radar
+        for radar in range(0,len(outStringArray)):
+            radarString = outStringArray[radar].split('=')
+            if radarString[0] == 'ALB':
+                alb = int(radarString[1])
+            if (radarString[0] == 'DOE') | (radarString[0] == 'DOL'):
+                dol = int(radarString[1])
+            if (radarString[0] == 'MLE') | (radarString[0] == 'LEM'):
+                lem = int(radarString[1])
+            if radarString[0] == 'PPM':
+                ppm = int(radarString[1])
+            if radarString[0] == 'WEI':
+                wei = int(radarString[1])
+    except:
+        print('ALB activity not readable from ', fileName)
+        print('Use the data quality from file name instead')
+        
+        # Default values if nothing is found in gif file
+        alb = -1
+        dol = -1
+        lem = -1
+        ppm = -1
+        wei = -1
+
+    return(alb, dol, lem, ppm, wei)
