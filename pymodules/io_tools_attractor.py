@@ -16,6 +16,9 @@ import os
 import subprocess
 import sys
 
+sys.path.append('/store/mch/msrad/python/library/radar/io/') # path to metranet library
+import metranet
+
 import fnmatch
 import pandas as pd
 
@@ -58,11 +61,14 @@ def get_filename_radar(timeStr, inBaseDir='/scratch/lforesti/data/', product='AQ
     radarOperWildCard = '?'
     subDir = str(year) + '/' + yearStr + julianDayStr + '/'
     inDir = inBaseDir + subDir
-    fileNameWildCard = inDir + product + yearStr + julianDayStr + hourminStr + radarOperWildCard + '_' + timeAccumMinStr + '*.gif'
+    if product == 'RZC':
+        fileNameWildCard = inDir + product + yearStr + julianDayStr + hourminStr + radarOperWildCard + radarOperWildCard + '.801'
+    else:
+        fileNameWildCard = inDir + product + yearStr + julianDayStr + hourminStr + radarOperWildCard + '_' + timeAccumMinStr + '*.gif'
 
     # Get filename matching regular expression
     fileName = get_filename_matching_regexpr(fileNameWildCard)
-    
+
     return(fileName, yearStr, julianDayStr, hourminStr)
 
 def get_filename_matching_regexpr(fileNameWildCard):
@@ -93,6 +99,159 @@ def get_filename_matching_regexpr(fileNameWildCard):
         fileName = 'none'
         
     return(fileName)
+
+def read_bin_image(timeStr, product='RZC', minR = 0.08, fftDomainSize = 512, resKm = 1,\
+    inBaseDir = '/scratch/lforesti/data/', noData = -999.0, cmaptype = 'MeteoSwiss', domain = 'CCS4'):
+    
+    # Limits of spatial domain
+    if domain == 'CCS4':
+        Xmin = 255000
+        Xmax = 965000
+        Ymin = -160000
+        Ymax = 480000
+    else:
+        print('Domain not found.')
+        sys.exit(1)
+    allXcoords = np.arange(Xmin,Xmax+resKm*1000,resKm*1000)
+    allYcoords = np.arange(Ymin,Ymax+resKm*1000,resKm*1000)
+    
+    # colormap
+    color_list, clevs, clevsStr = dt.get_colorlist(cmaptype) 
+
+    cmap = colors.ListedColormap(color_list)
+    norm = colors.BoundaryNorm(clevs, cmap.N)
+    cmap.set_over('black',1)
+    cmapMask = colors.ListedColormap(['black'])
+    
+    # Get filename
+    fileName, yearStr, julianDayStr, hourminStr = get_filename_radar(timeStr, inBaseDir, product)
+    timeLocal = ti.timestring2datetime(timeStr)
+    
+    # Check if file exists
+    isFile = os.path.isfile(fileName)
+    if (isFile == False):
+        print('File: ', fileName, ' not found.')
+        radar_object = Radar_object()  
+    else:
+        try:
+            ret = metranet.read_file(fileName, physic_value=True, verbose=False)
+            rainrate = ret.data # mm h-1
+
+            # Get coordinates of reduced domain
+            if fftDomainSize>0:
+                extent = dt.get_reduced_extent(rainrate.shape[1], rainrate.shape[0], fftDomainSize, fftDomainSize)
+                Xmin = allXcoords[extent[0]]
+                Ymin = allYcoords[extent[1]]
+                Xmax = allXcoords[extent[2]]
+                Ymax = allYcoords[extent[3]]
+        
+            subXcoords = np.arange(Xmin,Xmax,resKm*1000)
+            subYcoords = np.arange(Ymin,Ymax,resKm*1000)
+            
+            # Select 512x512 domain in the middle
+            if fftDomainSize>0:
+                rainrate = dt.extract_middle_domain(rainrate, fftDomainSize, fftDomainSize)
+          
+            # Create mask radar composite
+            mask = np.ones(rainrate.shape)
+            mask[rainrate != noData] = np.nan
+            mask[rainrate == noData] = 1
+
+            # Set lowest rain thresholds
+            if (minR > 0.0) and (minR < 500.0):
+                rainThreshold = minR
+            else: # default minimum rainfall rate
+                rainThreshold = 0.08
+                
+            # Compute WAR
+            war = st.compute_war(rainrate,rainThreshold, noData)
+            
+            # fills no-rain with nans (for conditional statistics)
+            rainrateNans = np.copy(rainrate)
+            condition = rainrateNans < rainThreshold
+            rainrateNans[condition] = np.nan
+            
+            # fills no-rain with zeros and missing data with nans (for unconditional statistics)
+            condition = rainrate < 0
+            rainrate[condition] = np.nan
+            condition = (rainrate < rainThreshold) & (rainrate > 0.0)
+            rainrate[condition] = 0.0
+            
+            # Compute corresponding reflectivity
+            A = 316.0
+            b = 1.5
+            
+            # Take reflectivity value corresponding to minimum rainfall threshold as zero(0.08 mm/hr)
+            dbzThreshold,_,_ = dt.rainrate2reflectivity(rainThreshold, A, b)
+            
+            # Convert rainrate to reflectivity, no-rain are set to zero (for unconditional statistics)
+            dBZ, minDBZ, minRainRate = dt.rainrate2reflectivity(rainrate, A, b, 0.0)
+           
+            # fills nans with dbzThreshold for Fourier analysis
+            condition1 = np.isnan(dBZ) 
+            condition2 = dBZ < dbzThreshold
+            dBZFourier = np.copy(dBZ)
+            dBZFourier[(condition1 == True) | (condition2 == True)] = dbzThreshold
+            
+            # fills no-rain and missing data with nans (for conditional statistics)
+            condition = rainrateNans < rainThreshold
+            dBZNans = np.copy(dBZ)
+            dBZNans[condition] = np.nan
+            
+            ## Creates radar object
+            radar_object = Radar_object()
+
+            # fields
+            radar_object.dBZ = dBZ
+            radar_object.dBZFourier = dBZFourier
+            radar_object.dBZNans = dBZNans
+            radar_object.rain8bit = []
+            radar_object.rainrate = rainrate
+            radar_object.rainrateNans = rainrateNans
+            radar_object.mask = mask
+            
+            # statistics
+            radar_object.war = war
+            
+            # time stamps
+            radar_object.datetime = timeLocal
+            radar_object.datetimeStr = timeStr
+            radar_object.hourminStr = hourminStr
+            radar_object.yearStr = yearStr
+            radar_object.julianDayStr = julianDayStr
+            
+            # metadata
+            radar_object.fileName = fileName
+            radar_object.dbzThreshold = dbzThreshold
+            radar_object.rainThreshold = rainThreshold
+            radar_object.alb = []
+            radar_object.dol = []
+            radar_object.lem = []
+            radar_object.ppm = []
+            radar_object.wei = []
+            radar_object.dataQuality = []
+            
+            # Location
+            radar_object.extent = (Xmin, Xmax, Ymin, Ymax)
+            radar_object.subXcoords = subXcoords
+            radar_object.subYcoords = subYcoords
+            if dBZ.shape[0] == dBZ.shape[1]:
+                radar_object.fftDomainSize = dBZ.shape[0]
+            else:
+                radar_object.fftDomainSize = dBZ.shape
+            
+            # colormaps
+            radar_object.cmap = cmap
+            radar_object.norm = norm
+            radar_object.clevs = clevs
+            radar_object.clevsStr = clevsStr
+            radar_object.cmapMask = cmapMask
+
+        except IOError:
+            print('File ', fileName, ' not readable')
+            radar_object = Radar_object()  
+    
+    return radar_object
     
 def read_gif_image(timeStr, product='AQC', minR = 0.08, fftDomainSize = 512, resKm = 1, timeAccumMin = 5,\
     inBaseDir = '/scratch/lforesti/data/', noData = -999.0, cmaptype = 'MeteoSwiss', domain = 'CCS4'):
