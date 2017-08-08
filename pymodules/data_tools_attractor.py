@@ -24,6 +24,7 @@ import geo
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.colors as colors
 
 def linear_rescaling(value, oldmin, oldmax, newmin, newmax):
     newvalue= (newmax-newmin)/(oldmax-oldmin)*(value-oldmax)+newmax
@@ -636,6 +637,55 @@ def deg2compass(arrayDegrees,stringType='short'):
         arrayDegrees = np.array(arrayDegrees)
     return arrayCompass
 
+from matplotlib.colors import from_levels_and_colors 
+from pylab import get_cmap
+def smart_colormap(clevs, name='jet', extend='both', minval=0.0, maxval=1.0):
+    '''
+    Automatically grabs the colors to extend the colorbar from the colormap.
+    '''
+    
+    # Define number of colors
+    if extend == 'both':
+        nrColors = len(clevs)+1
+    elif (extend == 'min') | (extend == 'max'):
+        nrColors = len(clevs)
+    elif (extend == 'neither'):
+        nrColors = len(clevs)-1
+    else:
+        nrColors = len(clevs)-1
+        extend = 'neither'
+    
+    # Get colormap
+    cmap = get_cmap(name, nrColors)
+    
+    # Truncate colormap if asked
+    if (minval != 0.0) or (maxval != 1.0):
+        cmap = truncate_colormap(cmap, minval=minval, maxval=maxval, n=nrColors/2)
+    
+    # Get the list of colors
+    colors = []
+    for i in range(0, nrColors):
+        colors.append(cmap(i/(nrColors-1)))
+    
+    # Use utility function to get cmap and norm at the same time
+    cmap, norm = from_levels_and_colors(clevs, colors, extend=extend)
+
+    return(cmap, norm)
+
+def colormap_meteoswiss(clevs):
+    colorsMS,_,_ = get_colorlist(type='MeteoSwiss')
+    cmap = colors.LinearSegmentedColormap.from_list("cmap", colorsMS, len(clevs)-1)
+    cmap.set_over('darkred',1)
+    norm = colors.BoundaryNorm(clevs, cmap.N)    
+    
+    return(cmap, norm)
+
+def truncate_colormap(cmap, minval=0.0, maxval=1.0, n=100):
+    new_cmap = colors.LinearSegmentedColormap.from_list(
+        'trunc({n},{a:.2f},{b:.2f})'.format(n=cmap.name, a=minval, b=maxval),
+        cmap(np.linspace(minval, maxval, n)))
+    return new_cmap
+    
 def create_smart_clevels(minCountLevels=0, maxCountLevels=100):
     diffMaxMin = maxCountLevels - minCountLevels
     

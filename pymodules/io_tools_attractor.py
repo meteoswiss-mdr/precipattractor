@@ -524,6 +524,14 @@ def get_filename_velocity(inBaseDir, analysisType, timeDate, product='AQC', time
     fileName = os.path.basename(fullName)
 
     return(fullName, dirName, fileName)
+
+def get_filename_HZT(dataDirHZT, dateTime):
+    year, yearStr, julianDay, julianDayStr = ti.parse_datetime(dateTime)
+    dirName = dataDirHZT + str(year) + '/' + yearStr + julianDayStr + '/'
+    fileName = 'HZT' + yearStr + julianDayStr + '%02i' % (dateTime.hour) + '%02i' % (dateTime.minute) + '0L.800'
+    
+    fileNameHZT = dirName + fileName
+    return(fileNameHZT)
     
 def get_filename(inBaseDir, analysisType, timeDate, varNames, varValues, product='AQC', timeAccumMin=5, quality=0, format='netcdf', sep='_'):
     if format == 'netcdf':

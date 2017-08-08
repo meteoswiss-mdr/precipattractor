@@ -73,9 +73,9 @@ def datetime2juliantimestring(timeDate, format='YYYYJJJHHMM'):
     minute = timeDate.minute
     hourminStr = ('%02i' % hour) + ('%02i' % minute)
     if format == 'YYYYJJJHHMM':
-        timeString = yearStr + julianDayStr + hourminStr
+        timeString = str(year) + julianDayStr + hourminStr
     if format == 'YYJJJHHMM':
-        timeString = yearStr[2:4] + julianDayStr + hourminStr
+        timeString = yearStr + julianDayStr + hourminStr
         
     return(timeString)
     
@@ -129,6 +129,7 @@ def juliantimestring2datetime(timeString, format='YYJJJHHMM'):
         sys.exit(1)
 
     return(timeDate)   
+
 
 def juliantimestring2datetime_array(timeStampJulianArray, format='YYJJJHHMM', timeString=True):
     '''
@@ -244,6 +245,27 @@ def timestring_array2datetime_array(arrayTimeStampsStr):
         arrayTimeStampsDt.append(timeDate)
     
     return(arrayTimeStampsDt)
+
+def juliantimeInt2juliantimeStr(juliantimeInt):
+    '''
+    50010000 -> '050010000'
+    '''
+    timeStampJulianStr = map(lambda x: '%09i' % x, juliantimeInt)
+    
+    return(timeStampJulianStr)
+    
+def year2digit_to_year4digit(arrayYear2digit):
+    '''
+    Function to convert an array of year strings YY into an array of year strings YYYY
+    '''
+    arrayYear2digit = np.array(arrayYear2digit, dtype=int)
+    arrayYear4digit = np.array(arrayYear2digit)
+    
+    bool80 = (arrayYear2digit > 80)
+    arrayYear4digit[bool80] = arrayYear2digit[bool80] + 1900
+    arrayYear4digit[~bool80] = arrayYear2digit[~bool80] + 2000
+    
+    return(arrayYear4digit)
     
 def get_HHmm_str(hour, minute):
     '''
