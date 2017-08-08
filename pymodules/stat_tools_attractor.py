@@ -179,6 +179,51 @@ def compute_2d_spectrum(rainfallImage, resolution=1, window=None, FFTmod='NUMPY'
     
     return(psd2d, freq)
 
+def compute_dct_1d_spectrum(rainfallImage, resolution=1):
+    '''
+    Function to compute the 2D Discrete Cosine Transform power spectrum.
+    
+    Parameters
+    ----------
+    rainfallImage : numpyarray(float)
+        Input 2d array with the rainfall field (or any kind of image)
+    resolution : float
+        Resolution of the image grid (e.g. in km) to compute the Fourier frequencies
+    '''
+    
+    fieldSize = rainfallImage.shape
+    
+    # Compute DCT
+    fprecip = fftpack.dct(fftpack.dct(rainfallImage.T, norm='ortho').T, norm='ortho') 
+    
+    # Compute 2D power spectrum
+    psd2d = np.abs(fprecip)**2/(fieldSize[0]*fieldSize[1])     
+
+    # Variance binning (Denis et al., 2002)
+    ix = range(fieldSize[0])
+    jx = range(fieldSize[1])
+    I,J = np.meshgrid(ix,jx)
+    alphas = np.sqrt(I**2/fieldSize[0]**2 + J**2/fieldSize[1]**2)
+    # plt.imshow(alphas)
+    # plt.show()
+    
+    kmax = np.minimum(fieldSize[0],fieldSize[1])
+    psd1d = np.zeros(kmax-1)
+    wavelength = np.zeros(kmax-1)
+    # for k in xrange(2,kmax):
+    for k in xrange(1,kmax):
+        alpha_k_low = k/kmax
+        alpha_k_up = (k+1)/kmax
+        wavelength[k-1] = 2*resolution/alpha_k_low
+        # print(k,wavelength[k-1])
+        idx00 = np.logical_or(I>0,J>0)
+        idx = np.logical_and(alphas >= alpha_k_low,alphas < alpha_k_up, idx00)
+        psd1d[k-1] += psd2d[idx].sum()
+    
+    freq = resolution*1.0/wavelength
+
+    return psd1d, freq, wavelength
+    
 def compute_radialAverage_spectrum(psd2d, resolution=1):
     '''
     Function to compute the 1D radially averaged spectrum from the 2D spectrum.
@@ -284,8 +329,8 @@ def compute_fft_anisotropy(psd2d, fftSizeSub = -1, percentileZero = -1, rotation
     # Get dimensions of the large and subdomain
     if fftSizeSub == -1:
         fftSizeSub = psd2d.shape[0]/2
-    
-    if type(fftSizeSub) == 'float':
+
+    if isinstance(fftSizeSub,float):
         fftSizeSub = int(fftSizeSub)
     
     fftSize = psd2d.shape
@@ -368,12 +413,12 @@ def compute_fft_anisotropy(psd2d, fftSizeSub = -1, percentileZero = -1, rotation
     
     ############### ECCENTRICITY/ORIENTATION
     # Compute eccentricity and orientation of anisotropy
-    idxMax = np.argmin(eigvals)
+    idxMax = np.argmax(eigvals)
     #eccentricity = np.max(np.sqrt(eigvals))/np.min(np.sqrt(eigvals))
     eccentricity = math.sqrt(1-np.min(eigvals)/np.max(eigvals))
-    orientation = np.degrees(math.atan(eigvecs[0,idxMax]/eigvecs[1,idxMax])) # atan or atan2?
+    orientation = np.degrees(math.atan2(eigvecs[1,idxMax],eigvecs[0,idxMax])) # atan or atan2?
         
-    return psd2dsub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs, percZero, psd2dsubSmooth
+    return psd2dsub, eccentricity, orientation, xbar, ybar, eigvals, eigvecs, percZero, psd2dsubSmoothShifted*mask
 
 def compute_autocorrelation_fft2(imageArray, resolution=1, FFTmod = 'NUMPY'):
     '''
