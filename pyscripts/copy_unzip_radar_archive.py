@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+from __future__ import division
+from __future__ import print_function
+
 import os
 import datetime
 import time
@@ -49,7 +52,6 @@ timeEnd = ti.timestring2datetime(timeEndStr)
 tic = time.clock()
 timeLocal = timeStart
 while timeLocal <= timeEnd:
-    print("Copying and unzipping data from: ", timeLocal)
     year = timeLocal.year
     hour = timeLocal.hour
     minute = timeLocal.minute
@@ -73,27 +75,35 @@ while timeLocal <= timeEnd:
         fileName = product + yearDayStr + "_" + timeAccumMinStr + ".zip"
         inFile = inBaseDir + subDir + fileName
     
-    # Copy data
-    cmd = 'mkdir -p ' + outDir
-    os.system(cmd)
-    cmd = 'cp -f ' + inFile + ' ' + outDir
-    print(cmd)
-    os.system(cmd)
+    if os.path.isfile(inFile) == True: 
+        # Copy data
+        cmd = 'mkdir -p ' + outDir
+        os.system(cmd)
+        cmd = 'cp -f ' + inFile + ' ' + outDir
+        print(cmd)
+        os.system(cmd)
 
-    # Unzip data in the output directory. Unzip only specific accumulation
-    outFile = outDir + fileName
-    if product == 'RZC':
-        cmd = 'unzip -o ' + outFile + ' "RZC????????[05]??.801"' + ' -d ' + outDir
+        # Unzip data in the output directory. Unzip only specific accumulation
+        outFile = outDir + fileName
+        if product == 'RZC':
+            cmd = 'unzip -o ' + outFile + ' "RZC????????[05]??.801"' + ' -d ' + outDir
+        elif product == 'HZT':
+            # Unzip only analysis
+            cmd = 'unzip -q -o ' + outFile + ' "*.800"' + ' -d ' + outDir
+        else:
+            cmd = 'unzip -q -o ' + outFile + ' "*_' + timeAccumMinStr + '."*' + ' -d ' + outDir
+        print(cmd)
+        os.system(cmd)
+
+        # Remove zip file at the output
+        cmd = 'rm ' + outFile
+        print(cmd)
+        os.system(cmd)
+        print('----------------------------------------------')
     else:
-        cmd = 'unzip -o ' + outFile + ' "*_' + timeAccumMinStr + '."*' + ' -d ' + outDir
-    print(cmd)
-    os.system(cmd)
-
-    # Remove zip file at the output
-    cmd = 'rm ' + outFile
-    os.system(cmd)
+        print(inFile, 'not found.')
 
     # Add 5 minutes
-    timeLocal = timeLocal + datetime.timedelta(hours = tempSampHours)
+    timeLocal = timeLocal + datetime.timedelta(hours=tempSampHours)
 
 

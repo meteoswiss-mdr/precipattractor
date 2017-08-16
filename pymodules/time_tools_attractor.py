@@ -54,7 +54,7 @@ def datetime2timestring(timeDate):
     timeString = timeDate.strftime("%Y%m%d%H%M%S")
     return(timeString)
     
-def datetime2juliantimestring(timeDate, format='YYYYJJJHHMM'):
+def datetime2juliantimestring(timeDate, format='YYJJJHHMM'):
     '''
     Function to convert datetime object to a Julian time stamp string YYYYJJJHHMM.
     

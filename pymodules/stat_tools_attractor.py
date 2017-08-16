@@ -482,6 +482,57 @@ def compute_autocorrelation_fft(timeSeries, FFTmod = 'NUMPY'):
     #print("Elapsed time for ACF using FFT: ", toc-tic, " seconds.")
     return(autocorrelation, powerSpectrum)
 
+def fourier_low_pass2d(imageArray, cutoff_scale_km, resolution_km=1, FFTmod='NUMPY'):
+    field_mean = np.mean(imageArray)
+    field_var = np.var(imageArray)
+    field_dim = imageArray.shape
+    
+    # Compute FFT
+    if FFTmod == 'NUMPY':
+        fourier = np.fft.fft2(imageArray) # Numpy implementation
+    if FFTmod == 'FFTW':
+        fourier = pyfftw.interfaces.numpy_fft.fft2(imageArray) # FFTW implementation
+        # Turn on the cache for optimum performance
+        pyfftw.interfaces.cache.enable()
+
+    fourier_shifted = np.fft.fftshift(fourier)
+    
+    # Compute frequencies
+    freq_noshift_x = fftpack.fftfreq(field_dim[1], d=float(resolution_km))
+    freq_noshift_y = fftpack.fftfreq(field_dim[0], d=float(resolution_km))
+    freq_shifted_x = np.fft.fftshift(freq_noshift_x)
+    freq_shifted_y = np.fft.fftshift(freq_noshift_y)
+    
+    freq_shifted_x, freq_shifted_y = np.meshgrid(freq_shifted_x, freq_shifted_y)
+    
+    # Get filter
+    cutoff_frequency = resolution_km/cutoff_scale_km
+    mask = freq_shifted_x**2 + freq_shifted_y**2 <= cutoff_frequency**2
+    mask = mask.astype(int)
+    
+    # Apply mask
+    fourier_shifted = fourier_shifted*mask
+    fourier = np.fft.fftshift(fourier_shifted)
+    
+    # Plotting masked spectrum to check everything is right
+    # nr_samples = field_dim[0]*field_dim[1]
+    # plt.imshow(np.log10(np.abs(fourier_shifted)**2/nr_samples))
+    # # plt.imshow(mask)
+    # plt.show()
+    
+    # Tranform back
+    if FFTmod == 'NUMPY':
+        imageArray_bandpassed = np.fft.ifft2(fourier) # Numpy implementation
+    if FFTmod == 'FFTW':
+        imageArray_bandpassed = pyfftw.interfaces.numpy_fft.ifft2(fourier) # FFTW implementation
+        # Turn on the cache for optimum performance
+        pyfftw.interfaces.cache.enable()
+
+    # Get real part
+    imageArray_bandpassed = imageArray_bandpassed.real
+
+    return(imageArray_bandpassed)
+    
 def time_delay_embedding(timeSeries, nrSteps=1, stepSize=1, noData=np.nan):
     '''
     This function takes an input time series and gives an ndarray of delayed vectors.
