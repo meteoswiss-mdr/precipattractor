@@ -103,6 +103,26 @@ def get_filename_matching_regexpr(fileNameWildCard):
         
     return(fileName)
 
+def read_gif_image_rainrate(timeStr, inBaseDir='/scratch/lforesti/data/', product='AQC', timeAccumMin=5):
+    '''
+    Basic script to read a radar GIF file and transform to rainrate
+    
+    '''
+    fileNameRadar,_,_,_ = get_filename_radar(timeStr, inBaseDir=inBaseDir, product=product, timeAccumMin=timeAccumMin)
+    rain8bit, nrRows, nrCols = open_gif_image(fileNameRadar)
+    
+    # Generate lookup table
+    noData = -999
+    lut = dt.get_rainfall_lookuptable(noData)
+
+    # Replace 8bit values with rain rates 
+    rainrate = lut[rain8bit]
+    
+    if (product == 'AQC'): # AQC is given in millimiters!!!
+        rainrate[rainrate != noData] = rainrate[rainrate != noData]*(60/timeAccumMin)
+    
+    return(rainrate, fileNameRadar)
+
 def read_bin_image(timeStr, product='RZC', minR = 0.08, fftDomainSize = 512, resKm = 1,\
     inBaseDir = '/scratch/ned/data/', noData = -999.0, cmaptype = 'MeteoSwiss', domain = 'CCS4'):
     
@@ -312,10 +332,10 @@ def read_gif_image(timeStr, product='AQC', minR = 0.08, fftDomainSize = 512, res
             rainrate = lut[rain8bit]
             
             if (product == 'AQC'): # AQC is given in millimiters!!!
-                rainrate[rainrate != noData] = rainrate[rainrate != noData]*(60/5)
+                rainrate[rainrate != noData] = rainrate[rainrate != noData]*(60/timeAccumMin)
 
             # Get coordinates of reduced domain
-            if fftDomainSize>0:
+            if fftDomainSize > 0:
                 extent = dt.get_reduced_extent(rainrate.shape[1], rainrate.shape[0], fftDomainSize, fftDomainSize)
                 Xmin = allXcoords[extent[0]]
                 Ymin = allYcoords[extent[1]]
@@ -534,7 +554,7 @@ def get_filename_HZT(dataDirHZT, dateTime):
     fileName = 'HZT' + yearStr + julianDayStr + '%02i' % (dateTime.hour) + '%02i' % (dateTime.minute) + '0L.800'
     
     fileNameHZT = dirName + fileName
-    return(fileNameHZT)
+    return(fileNameHZT, dirName)
     
 def get_filename(inBaseDir, analysisType, timeDate, varNames, varValues, product='AQC', timeAccumMin=5, quality=0, format='netcdf', sep='_'):
     if format == 'netcdf':

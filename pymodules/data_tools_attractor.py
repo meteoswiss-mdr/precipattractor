@@ -879,3 +879,44 @@ def draw_regions(ax, fontsize=11, color='r'):
         else:
             rotation = 0
         ax.annotate(label, xy = (x, y), xytext = (0, 0), rotation=rotation, ha='center', va='center', textcoords = 'offset points',fontsize=fontsize)
+        
+def extract_field_values_at_coords(field_flat, all_field_coordinates, location_coordinates, verbose=1):      
+    '''
+    Extract the values of a field (1d flattened array) at given coordinates.
+    all_field_coordinates is an Nx2 array with all the coordinate combinations of the field [[x0,y0],[x1,y0],[x2,y0],...,[x0,y1],[x1,y1],...]
+    location_coordinates is the same but with the subset of coordinates to extract
+    
+    
+    Returns
+    ----------
+    location_values_array: list(float)
+        Nx3 array with x,y coordinates of the box and the HZT value
+       
+    '''
+    nrCoordinates = len(location_coordinates)
+    
+    xcoord_all = all_field_coordinates[:,0]
+    ycoord_all = all_field_coordinates[:,1]
+
+    location_values_array = []
+    for box in range(0, nrCoordinates):
+        xcoord = location_coordinates[box,0]
+        ycoord = location_coordinates[box,1]
+        
+        # Find corresponding index on HZT field
+        idx = np.where((xcoord_all == xcoord) & (ycoord_all == ycoord))[0]
+        
+        if len(idx) == 1:
+            hzt_value = field_flat[idx][0]
+            rowBoxes = [xcoord, ycoord, hzt_value]
+            location_values_array.append(rowBoxes)
+        elif len(idx) == 0:
+            print('Index of field not found', len(idx))
+        else:
+            print('Too many indices on field found', len(idx))
+        
+        # Print out advancement
+        if verbose == 1:
+            update_progress((box+1)/nrCoordinates, processName = "Progress")
+        
+    return(location_values_array)
