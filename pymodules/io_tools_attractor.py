@@ -16,7 +16,10 @@ import os
 import subprocess
 import sys
 
-sys.path.append('/store/mch/msrad/python/library/radar/io/') # path to metranet library
+# path to metranet library, 
+# also need to create environment variable before starting python: 
+# export LIBRARY_METRANET_PATH=/store/mch/msrad/R/shared_lib
+sys.path.append('/store/mch/msrad/python/library/radar/io/') 
 import metranet
 
 import fnmatch
@@ -101,7 +104,7 @@ def get_filename_matching_regexpr(fileNameWildCard):
     return(fileName)
 
 def read_bin_image(timeStr, product='RZC', minR = 0.08, fftDomainSize = 512, resKm = 1,\
-    inBaseDir = '/scratch/lforesti/data/', noData = -999.0, cmaptype = 'MeteoSwiss', domain = 'CCS4'):
+    inBaseDir = '/scratch/ned/data/', noData = -999.0, cmaptype = 'MeteoSwiss', domain = 'CCS4'):
     
     # Limits of spatial domain
     if domain == 'CCS4':

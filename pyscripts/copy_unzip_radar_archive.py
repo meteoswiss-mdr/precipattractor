@@ -23,7 +23,7 @@ tempSampHours = 24 # Temporal sampling for files
 parser = argparse.ArgumentParser(description='Copy and unzip radar data (from store to scratch).')
 parser.add_argument('-start', default='201604010000', type=str,help='Start time of the period: YYYYMMDDHHmmSS')
 parser.add_argument('-end', default='201604010000', type=str,help='End time of the period: YYYYMMDDHHmmSS')
-parser.add_argument('-product', default='AQC', type=str,help='Which radar rainfall product to use (AQC, CPC, etc).')
+parser.add_argument('-product', default='RZC', type=str,help='Which radar rainfall product to use (AQC, CPC, etc).')
 parser.add_argument('-accum', default=5, type=int,help='Accumulation time of the product [minutes].')
 parser.add_argument('-username', default='lforesti', type=str,help='')
 
