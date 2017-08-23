@@ -7,6 +7,7 @@ import datetime
 import time
 import argparse
 import sys
+import numpy as np
 
 import getpass
 username = getpass.getuser()
@@ -88,13 +89,43 @@ while timeLocal <= timeEnd:
         if product == 'RZC':
             cmd = 'unzip -o ' + outFile + ' "RZC????????[05]??.801"' + ' -d ' + outDir
         elif product == 'HZT':
-            # Unzip only analysis
+            # Unzip only 3-hourly analyses
             cmd = 'unzip -q -o ' + outFile + ' "*.800"' + ' -d ' + outDir
         else:
             cmd = 'unzip -q -o ' + outFile + ' "*_' + timeAccumMinStr + '."*' + ' -d ' + outDir
         print(cmd)
         os.system(cmd)
-
+        
+        # Extract additional hourly analyses
+        period2014 = (timeLocal.year == 2014) & (timeLocal.month <= 9) # Starting in October there are no more pure hourly analyses
+        period = (timeLocal.year >= 2005) & (timeLocal.year <= 2013) | period2014
+        if (product == 'HZT') & period:
+            cmd = 'unzip -q -o ' + outFile + ' "*.801"' + ' -d ' + outDir
+            print(cmd)
+            os.system(cmd)
+            cmd = 'unzip -q -o ' + outFile + ' "*.802"' + ' -d ' + outDir
+            print(cmd)
+            os.system(cmd)
+            # Change filenames for HZT fields analysis. 1500 -> 802 -> 1700 (analysis)
+            
+            for hour in range(0,24,3):
+                hourStr_old = "%02i" % hour
+                hourStr_new1 = "%02i" % (hour+1)
+                hourStr_new2 = "%02i" % (hour+2)
+                
+                fileNameHZT_old1 = outDir + product + yearDayStr + hourStr_old + '000L.801'
+                fileNameHZT_old2 = outDir + product + yearDayStr + hourStr_old + '000L.802'
+                fileNameHZT_new1 = outDir + product + yearDayStr + hourStr_new1 + '000L.800'
+                fileNameHZT_new2 = outDir + product + yearDayStr + hourStr_new2 + '000L.800'
+                
+                cmd = 'mv -f ' + fileNameHZT_old1 + ' ' + fileNameHZT_new1
+                print(cmd)
+                os.system(cmd)
+                
+                cmd = 'mv -f ' + fileNameHZT_old2 + ' ' + fileNameHZT_new2
+                print(cmd)
+                os.system(cmd)
+        
         # Remove zip file at the output
         cmd = 'rm ' + outFile
         print(cmd)
