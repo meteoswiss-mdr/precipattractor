@@ -68,7 +68,7 @@ def get_filename_radar(timeStr, inBaseDir='/scratch/lforesti/data/', product='AQ
 
     # Get filename matching regular expression
     fileName = get_filename_matching_regexpr(fileNameWildCard)
-
+    
     return(fileName, yearStr, julianDayStr, hourminStr)
 
 def get_filename_matching_regexpr(fileNameWildCard):
@@ -78,7 +78,7 @@ def get_filename_matching_regexpr(fileNameWildCard):
     # Check if directory exists
     if os.path.isdir(inDir) == False:
         print('Directory: ' + inDir + ' does not exists.')
-        fileName = 'none'
+        fileName = ''
         return(fileName)
     
     # If it does, check for files matching regular expression
@@ -94,9 +94,9 @@ def get_filename_matching_regexpr(fileNameWildCard):
                     fileName = inDir + '/' + fileNameRel
                 break
             else:
-                fileName = 'none'
+                fileName = ''
     else:
-        fileName = 'none'
+        fileName = ''
         
     return(fileName)
 
@@ -106,17 +106,21 @@ def read_gif_image_rainrate(timeStr, inBaseDir='/scratch/lforesti/data/', produc
     
     '''
     fileNameRadar,_,_,_ = get_filename_radar(timeStr, inBaseDir=inBaseDir, product=product, timeAccumMin=timeAccumMin)
-    rain8bit, nrRows, nrCols = open_gif_image(fileNameRadar)
     
-    # Generate lookup table
-    noData = -999
-    lut = dt.get_rainfall_lookuptable(noData)
+    if os.path.isfile(fileNameRadar) == False:
+        rainrate = []
+    else:
+        rain8bit, nrRows, nrCols = open_gif_image(fileNameRadar)
+        
+        # Generate lookup table
+        noData = -999
+        lut = dt.get_rainfall_lookuptable(noData)
 
-    # Replace 8bit values with rain rates 
-    rainrate = lut[rain8bit]
-    
-    if (product == 'AQC'): # AQC is given in millimiters!!!
-        rainrate[rainrate != noData] = rainrate[rainrate != noData]*(60/timeAccumMin)
+        # Replace 8bit values with rain rates 
+        rainrate = lut[rain8bit]
+        
+        if (product == 'AQC'): # AQC is given in millimiters!!!
+            rainrate[rainrate != noData] = rainrate[rainrate != noData]*(60/timeAccumMin)
     
     return(rainrate, fileNameRadar)
 
@@ -552,6 +556,73 @@ def get_filename_HZT(dataDirHZT, dateTime):
     
     fileNameHZT = dirName + fileName
     return(fileNameHZT, dirName)
+
+def read_hzt_match_maple_archive(data, boxSize, dataDirHZT_base='/scratch/lforesti/data/'):
+
+    boxSizeStr = '%03i' % boxSize
+    timeStampJulian = data[:,0].astype(int)
+    startJulianTimeStr = '%09i' % np.min(timeStampJulian)
+    endJulianTimeStr = '%09i' % np.max(timeStampJulian)
+
+    startDateTimeStr = ti.juliantimestring2datetime(startJulianTimeStr)
+    endDateTimeStr = ti.juliantimestring2datetime(endJulianTimeStr)
+
+    HZT_MAPLE_array = np.ones((len(data),2))*[np.nan]
+    timeDate = startDateTimeStr
+    while timeDate <= endDateTimeStr:
+        # Get filename
+        year, yearStr, julianDay, julianDayStr = ti.parse_datetime(timeDate)
+        subDir = str(year) + '/' + yearStr + julianDayStr + '/'
+        fileNameHZT_dest = dataDirHZT_base + subDir + 'MAPLE-' + boxSizeStr + '-HZT_' + str(year) + '%02i' % timeDate.month + '%02i' % timeDate.day + '_destination.npy'
+        fileNameHZT_orig = dataDirHZT_base + subDir + 'MAPLE-' + boxSizeStr + '-HZT_' + str(year) + '%02i' % timeDate.month + '%02i' % timeDate.day + '_origin.npy'
+
+        # Read-in destination box file
+        if os.path.isfile(fileNameHZT_dest):
+            dataDest = np.load(fileNameHZT_dest)
+            print(fileNameHZT_dest, 'read.')
+            
+            # Fill in large MAPLE array at the right rows
+            for t in np.unique(dataDest[:,0]):
+                boolTime_dest_all = (timeStampJulian == t)
+                boolTime_dest_day = (dataDest[:,0] == t)
+                
+                nrMatchingBoxes_all = np.sum(boolTime_dest_all)
+                nrMatchingBoxes_day = np.sum(boolTime_dest_day)
+                # print(t, np.sum(boolTime_dest_all), np.sum(boolTime_dest_day))
+                if nrMatchingBoxes_all != nrMatchingBoxes_day:
+                    print('You should use the same dataset to extract and match the HZT values.')
+                    print('Expecing: ', nrMatchingBoxes_all, 'values. Received:', nrMatchingBoxes_day, 'values.')
+                    sys.exit()
+                
+                HZT_MAPLE_array[boolTime_dest_all,0] = dataDest[boolTime_dest_day,-1]
+        # else:
+            # print(fileNameHZT_dest, 'not found.')
+        
+        # Read-in origin box file
+        if os.path.isfile(fileNameHZT_orig):
+            dataOrig = np.load(fileNameHZT_orig)
+            print(fileNameHZT_orig, 'read.')
+            
+            # Fill in large MAPLE array at the right rows
+            for t in np.unique(dataOrig[:,0]):
+                boolTime_orig_all = (timeStampJulian == t)
+                boolTime_orig_day = (dataOrig[:,0] == t)
+                
+                nrMatchingBoxes_all = np.sum(boolTime_orig_all)
+                nrMatchingBoxes_day = np.sum(boolTime_orig_day)
+                #print(t, np.sum(boolTime_orig_all), np.sum(boolTime_orig_day))
+                if nrMatchingBoxes_all != nrMatchingBoxes_day:
+                    print('You should use the same dataset to extract and match the HZT values.')
+                    print('Expecing: ', nrMatchingBoxes_all, 'values. Received:', nrMatchingBoxes_day, 'values.')
+                    sys.exit()
+                
+                HZT_MAPLE_array[boolTime_orig_all,1] = dataOrig[boolTime_orig_day,-1]
+        # else:
+            # print(fileNameHZT_orig, 'not found.')
+
+        timeDate = timeDate + datetime.timedelta(days=1)
+    
+    return(HZT_MAPLE_array)
     
 def get_filename(inBaseDir, analysisType, timeDate, varNames, varValues, product='AQC', timeAccumMin=5, quality=0, format='netcdf', sep='_'):
     if format == 'netcdf':
