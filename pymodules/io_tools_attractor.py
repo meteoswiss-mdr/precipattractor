@@ -137,7 +137,7 @@ def read_bin_image(timeStr, product='RZC', minR = 0.08, fftDomainSize = 512, res
         sys.exit(1)
     allXcoords = np.arange(Xmin,Xmax+resKm*1000,resKm*1000)
     allYcoords = np.arange(Ymin,Ymax+resKm*1000,resKm*1000)
-    
+
     # colormap
     color_list, clevs, clevsStr = dt.get_colorlist(cmaptype) 
 
@@ -159,7 +159,8 @@ def read_bin_image(timeStr, product='RZC', minR = 0.08, fftDomainSize = 512, res
         try:
             ret = metranet.read_file(fileName, physic_value=True, verbose=False)
             rainrate = ret.data # mm h-1
-
+            rainrate[np.isnan(rainrate)] = noData
+            
             # Get coordinates of reduced domain
             if fftDomainSize>0:
                 extent = dt.get_reduced_extent(rainrate.shape[1], rainrate.shape[0], fftDomainSize, fftDomainSize)
@@ -277,7 +278,7 @@ def read_bin_image(timeStr, product='RZC', minR = 0.08, fftDomainSize = 512, res
     return radar_object
     
 def read_gif_image(timeStr, product='AQC', minR = 0.08, fftDomainSize = 512, resKm = 1, timeAccumMin = 5,\
-    inBaseDir = '/scratch/lforesti/data/', noData = -999.0, cmaptype = 'MeteoSwiss', domain = 'CCS4'):
+    inBaseDir = '/scratch/ned/data/', noData = -999.0, cmaptype = 'MeteoSwiss', domain = 'CCS4'):
     
     # Limits of spatial domain
     if domain == 'CCS4':
@@ -1267,7 +1268,7 @@ def get_radaroperation_from_quality(quality):
         dol = 1
         lem = 1
     
-    print(quality, '->', 'ALB=', alb, 'DOL=', dol, 'LEM=', lem)
+    # print(quality, '->', 'ALB=', alb, 'DOL=', dol, 'LEM=', lem)
     return(alb,dol,lem)
 
 def get_radaroperation_from_quality_4gen(quality):
@@ -1410,8 +1411,8 @@ def get_gif_radar_operation(fileName):
             if radarString[0] == 'WEI':
                 wei = int(radarString[1])
     except:
-        print('ALB activity not readable from ', fileName)
-        print('Use the data quality from file name instead')
+        # print('ALB activity not readable from ', fileName)
+        # print('Use the data quality from file name instead')
         
         # Default values if nothing is found in gif file
         alb = -1
