@@ -1,26 +1,18 @@
-# To use fieldextra it is necessary to relax system limits imposed on size of
-# stack, both for sequential mode and for OpenMP mode. Please execute these commands before you start fieldextra on kesch:
-
-# # bash:
-# ulimit -s unlimited              # unlimit stack size
-# export OMP_STACKSIZE=500M        # increase OpenMP stack size
-
-
 # Run specification and global blocks (compulsory!)
 #--------------------------------------------------
 
 &RunSpecification
   additional_profiling = .false.
-  strict_nl_parsing   = .true.
-  verbosity           = "silent"
-  diagnostic_length   = 110
-  soft_memory_limit   = 120.0 
+  strict_nl_parsing    = .true.
+  verbosity            = "silent"
+  diagnostic_length    = 110
+  soft_memory_limit    = 120.0 
 /
 
 &GlobalResource
-  dictionary         = "/oprusers/owm/opr/resources/dictionary_cosmo.txt",
+  dictionary           = "/oprusers/owm/opr/resources/dictionary_cosmo.txt",
   grib_definition_path = "/oprusers/owm/opr/resources/grib_api_definitions_cosmo", 
-                     "/oprusers/owm/opr/resources/grib_api_definitions_vendor"
+                         "/oprusers/owm/opr/resources/grib_api_definitions_vendor"
 /
 
 &GlobalSettings
