@@ -1,0 +1,64 @@
+# To use fieldextra it is necessary to relax system limits imposed on size of
+# stack, both for sequential mode and for OpenMP mode. Please execute these commands before you start fieldextra on kesch:
+
+# # bash:
+# ulimit -s unlimited              # unlimit stack size
+# export OMP_STACKSIZE=500M        # increase OpenMP stack size
+
+
+# Run specification and global blocks (compulsory!)
+#--------------------------------------------------
+
+&RunSpecification
+  additional_profiling = .false.
+  strict_nl_parsing   = .true.
+  verbosity           = "silent"
+  diagnostic_length   = 110
+  soft_memory_limit   = 120.0 
+/
+
+&GlobalResource
+  dictionary         = "/oprusers/owm/opr/resources/dictionary_cosmo.txt",
+  grib_definition_path = "/oprusers/owm/opr/resources/grib_api_definitions_cosmo", 
+                     "/oprusers/owm/opr/resources/grib_api_definitions_vendor"
+/
+
+&GlobalSettings
+  default_dictionary    = "cosmo",
+  default_model_name    = "<modelName>",
+  location_to_gridpoint = "sn",
+/
+
+&ModelSpecification
+  model_name         = "<modelName>"
+  earth_axis_large   = 6371229.
+  earth_axis_small   = 6371229.
+  hydrometeor        = "QR", "QS"
+  precip_all         = "RAIN_GSP", "RAIN_CON", "SNOW_GSP", "SNOW_CON"
+  precip_snow        = "SNOW_GSP", "SNOW_CON"
+  precip_rain        = "RAIN_GSP", "RAIN_CON"
+  precip_convective  = "RAIN_CON", "SNOW_CON"
+  precip_gridscale   = "RAIN_GSP", "SNOW_GSP"
+/
+
+# In core data
+#-------------
+&Process
+  in_file="<pathToFcst>laf<analysisRun>00"
+  out_type = "INCORE" 
+/
+&Process in_field    = "FR_LAND" /
+&Process in_field    = "SOILTYP" /
+&Process in_field    = "HSURF",tag='GRID' /
+
+# Extraction 
+# ----------
+&Process
+  in_file = "<pathToFcst>laf<analysisRun><HH>",
+  out_file = "<pathToOutput>",
+  in_regrid_target = "swiss,255500,-159500,964500,479500,1000,1000",
+  in_regrid_method="next_neighbour,square,<resKm>" 
+  out_type="NETCDF"
+  tstart = 0, tstop=23, tincr=1
+/
+&Process in_field = "<fieldName>"<toper>, regrid=.true./
