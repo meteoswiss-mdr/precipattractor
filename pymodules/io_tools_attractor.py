@@ -16,10 +16,7 @@ import os
 import subprocess
 import sys
 
-# path to metranet library, 
-# also need to create environment variable before starting python: 
-# export LIBRARY_METRANET_PATH=/store/mch/msrad/R/shared_lib
-sys.path.append('/store/mch/msrad/python/library/radar/io/') 
+sys.path.append('/store/mch/msrad/python/library/radar/io/') # path to metranet library
 import metranet
 
 import fnmatch
@@ -128,7 +125,7 @@ def read_gif_image_rainrate(timeStr, inBaseDir='/scratch/lforesti/data/', produc
     return(rainrate, fileNameRadar)
 
 def read_bin_image(timeStr, product='RZC', minR = 0.08, fftDomainSize = 512, resKm = 1,\
-    inBaseDir = '/scratch/ned/data/', noData = -999.0, cmaptype = 'MeteoSwiss', domain = 'CCS4'):
+    inBaseDir = '/scratch/lforesti/data/', noData = -999.0, cmaptype = 'MeteoSwiss', domain = 'CCS4'):
     
     # Limits of spatial domain
     if domain == 'CCS4':
@@ -560,32 +557,82 @@ def get_filename_HZT(dataDirHZT, dateTime):
     fileNameHZT = dirName + fileName
     return(fileNameHZT, dirName)
 
-def read_hzt_match_maple_archive(data, boxSize, dataDirHZT_base='/scratch/lforesti/data/'):
-
+def read_hzt_match_maple_archive(data, startTimeStr = '', endTimeStr = '', dict_colnames=[], task='add', dataDirHZT_base='/scratch/lforesti/data/', boxSize=64):
+    '''
+    Script to read in the daily .npy files containing the boxes with freezing level height data (t,x,y,HZT) at origin and destination.
+    The script only checks for the corresponding time stamp in the large MAPLE archive and adds the HZT data to the archive.
+    task
+    add: Add new columns with HZT data
+    replace: Completely replace columns with HZT data
+    complete: Only fill colmns with HZT data where there are NaNs
+    
+    '''
+    nrColsData = data.shape[1]
+    nrVars = len(dict_colnames)
+    
+    if (nrColsData != nrVars) & (task != 'add'):
+        print('The nr of columns of the data passed does not correspond to the nr of variables in the dictionary.')
+        print(nrColsData, 'vs', nrVars)
+        sys.exit(1)
+    
     boxSizeStr = '%03i' % boxSize
     timeStampJulian = data[:,0].astype(int)
-    startJulianTimeStr = '%09i' % np.min(timeStampJulian)
-    endJulianTimeStr = '%09i' % np.max(timeStampJulian)
-
-    startDateTimeStr = ti.juliantimestring2datetime(startJulianTimeStr)
-    endDateTimeStr = ti.juliantimestring2datetime(endJulianTimeStr)
-
-    HZT_MAPLE_array = np.ones((len(data),2))*[np.nan]
-    timeDate = startDateTimeStr
-    while timeDate <= endDateTimeStr:
+    
+    if (len(startTimeStr) == 0) & (len(endTimeStr) == 0):
+        startJulianTimeStr = '%09i' % np.min(timeStampJulian)
+        endJulianTimeStr = '%09i' % np.max(timeStampJulian)
+    
+        startDateTimeDt = ti.juliantimestring2datetime(startJulianTimeStr)
+        endDateTimeDt = ti.juliantimestring2datetime(endJulianTimeStr)
+    else:
+        startDateTimeDt = ti.timestring2datetime(startTimeStr)
+        endDateTimeDt = ti.timestring2datetime(endTimeStr)
+        
+    # Create new columns for HZT data or get them if already available
+    if (len(dict_colnames) == 0) | (task == 'add'):
+        if ('HZT_d' not in dict_colnames) & ('HZT_o' not in dict_colnames):
+            HZT_MAPLE_array = np.ones((len(data),2))*[np.nan]
+        else:
+            print('HZT_d and HZT_o already in dict_colnames.')
+            print('Task changed to complete columns.')
+            task = 'complete'
+            HZT_MAPLE_array = np.column_stack((data[:, dict_colnames['HZT_d']], data[:, dict_colnames['HZT_o']]))
+    elif (task == 'replace') | (task == 'complete'):
+        if ('HZT_d' in dict_colnames) & ('HZT_o' in dict_colnames):
+            HZT_MAPLE_array = np.column_stack((data[:, dict_colnames['HZT_d']], data[:, dict_colnames['HZT_o']]))
+        else:
+            print('HZT_d and HZT_o not in dict_colnames.')
+            print('Task changed to add columns.')
+            task = 'add'
+            HZT_MAPLE_array = np.ones((len(data),2))*[np.nan]
+    else:
+        print('Wrong task in read_hzt_match_maple_archive')
+        sys.exit(1)
+    
+    timeDate = startDateTimeDt
+    while timeDate <= endDateTimeDt:
+        # Print elapsed time
+        if (timeDate.day == 1):
+            ti.tic()
+        timeDate_next = timeDate + datetime.timedelta(days=1)
+        if (timeDate_next.day == 1):
+            ti.toc('to match one month of boxes.')
+        
         # Get filename
         year, yearStr, julianDay, julianDayStr = ti.parse_datetime(timeDate)
         subDir = str(year) + '/' + yearStr + julianDayStr + '/'
         fileNameHZT_dest = dataDirHZT_base + subDir + 'MAPLE-' + boxSizeStr + '-HZT_' + str(year) + '%02i' % timeDate.month + '%02i' % timeDate.day + '_destination.npy'
         fileNameHZT_orig = dataDirHZT_base + subDir + 'MAPLE-' + boxSizeStr + '-HZT_' + str(year) + '%02i' % timeDate.month + '%02i' % timeDate.day + '_origin.npy'
-
-        # Read-in destination box file
+        
+        # ti.tic()
+        #### Read-in destination box file
         if os.path.isfile(fileNameHZT_dest):
             dataDest = np.load(fileNameHZT_dest)
             print(fileNameHZT_dest, 'read.')
             
             # Fill in large MAPLE array at the right rows
-            for t in np.unique(dataDest[:,0]):
+            dayTimes = np.unique(dataDest[:,0])
+            for t in dayTimes:
                 boolTime_dest_all = (timeStampJulian == t)
                 boolTime_dest_day = (dataDest[:,0] == t)
                 
@@ -597,17 +644,23 @@ def read_hzt_match_maple_archive(data, boxSize, dataDirHZT_base='/scratch/lfores
                     print('Expecing: ', nrMatchingBoxes_all, 'values. Received:', nrMatchingBoxes_day, 'values.')
                     sys.exit()
                 
-                HZT_MAPLE_array[boolTime_dest_all,0] = dataDest[boolTime_dest_day,-1]
-        # else:
-            # print(fileNameHZT_dest, 'not found.')
-        
-        # Read-in origin box file
+                if (task == 'complete'):
+                    nrNaNs = np.sum(np.isnan(HZT_MAPLE_array[boolTime_dest_all,0]))
+                    if (nrNaNs > 0):
+                       HZT_MAPLE_array[boolTime_dest_all,0] = dataDest[boolTime_dest_day,-1]
+                    if (nrNaNs == 0) & (t == dayTimes[-1]):
+                       print('Destination already in archive.')
+                else:
+                    HZT_MAPLE_array[boolTime_dest_all,0] = dataDest[boolTime_dest_day,-1]
+                
+        #### Read-in origin box file
         if os.path.isfile(fileNameHZT_orig):
             dataOrig = np.load(fileNameHZT_orig)
             print(fileNameHZT_orig, 'read.')
             
             # Fill in large MAPLE array at the right rows
-            for t in np.unique(dataOrig[:,0]):
+            dayTimes = np.unique(dataOrig[:,0])
+            for t in dayTimes:
                 boolTime_orig_all = (timeStampJulian == t)
                 boolTime_orig_day = (dataOrig[:,0] == t)
                 
@@ -619,13 +672,33 @@ def read_hzt_match_maple_archive(data, boxSize, dataDirHZT_base='/scratch/lfores
                     print('Expecing: ', nrMatchingBoxes_all, 'values. Received:', nrMatchingBoxes_day, 'values.')
                     sys.exit()
                 
-                HZT_MAPLE_array[boolTime_orig_all,1] = dataOrig[boolTime_orig_day,-1]
-        # else:
-            # print(fileNameHZT_orig, 'not found.')
+                if (task == 'complete'):
+                    nrNaNs = np.sum(np.isnan(HZT_MAPLE_array[boolTime_orig_all,1]))
+                    if (nrNaNs > 0):
+                       HZT_MAPLE_array[boolTime_orig_all,1] = dataOrig[boolTime_orig_day,-1]
+                    if (nrNaNs == 0) & (t == dayTimes[-1]):
+                        print('Origin already in archive.')
+                else:
+                    HZT_MAPLE_array[boolTime_orig_all,1] = dataOrig[boolTime_orig_day,-1]
 
+        # ti.toc('to process one day.')
         timeDate = timeDate + datetime.timedelta(days=1)
     
-    return(HZT_MAPLE_array)
+    ##########
+    if (len(dict_colnames) == 0) | (task == 'add'):
+        print('Adding HZT columns to data...')
+        data = np.column_stack((data, HZT_MAPLE_array))
+        
+        max_col_nr = max(dict_colnames.values())
+        dict_colnames.update({'HZT_d' : (max_col_nr+1)})
+        dict_colnames.update({'HZT_o' : (max_col_nr+2)})
+    if (task == 'replace') | (task == 'complete'):
+        # Replace column data
+        print('Replacing HZT columns to data...')
+        data[:, dict_colnames['HZT_d']] = HZT_MAPLE_array[:,0]
+        data[:, dict_colnames['HZT_o']] = HZT_MAPLE_array[:,1]
+    
+    return(data, dict_colnames)
     
 def get_filename(inBaseDir, analysisType, timeDate, varNames, varValues, product='AQC', timeAccumMin=5, quality=0, format='netcdf', sep='_'):
     if format == 'netcdf':

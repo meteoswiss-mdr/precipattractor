@@ -689,7 +689,10 @@ def truncate_colormap(cmap, minval=0.0, maxval=1.0, n=100):
 def create_smart_clevels(minCountLevels=0, maxCountLevels=100):
     diffMaxMin = maxCountLevels - minCountLevels
     
-    if (diffMaxMin >= 10000):
+    if (diffMaxMin >= 50000) & (diffMaxMin < 500000):
+        maxCountLevels = int(maxCountLevels/10000)*10000
+        clevs = np.arange(minCountLevels,maxCountLevels,10000)
+    if (diffMaxMin >= 10000) & (diffMaxMin < 50000):
         maxCountLevels = int(maxCountLevels/1000)*1000
         clevs = np.arange(minCountLevels,maxCountLevels,1000)
     elif (diffMaxMin >= 5000) & (diffMaxMin < 10000):
@@ -713,6 +716,15 @@ def create_smart_clevels(minCountLevels=0, maxCountLevels=100):
     
     return(clevs)
 
+# def create_smart_clevels_new(minCountLevels=0, maxCountLevels=100):
+    # diffMaxMin = maxCountLevels - minCountLevels
+    
+    # array_classSep = np.array([1, 2, 2.5, 5])
+    
+    # clevs = np.arange(minCountLevels, maxCountLevels,10)  
+    
+    # return(clevs)
+    
 import matplotlib as mpl
 def reverse_colourmap(cmap, name = 'my_cmap_r'):
     """
@@ -779,22 +791,22 @@ def get_coordinates_swiss_locations(locations='radars', proj4stringCH=None):
         ('Bern', 46.9479739,7.447446799999966),
         ('Basel', 47.55959860000001,7.588576099999955),
         ('Geneva',46.2043907,6.143157699999961),
-        ('Lucerne', 47.050354, 8.304885),
-        ('Aosta', 45.736374, 7.315577),
-        ('Gotthard', 46.559302, 8.561800),
+        # ('Lucerne', 47.050354, 8.304885),
+        # ('Aosta', 45.736374, 7.315577),
+        # ('Gotthard', 46.559302, 8.561800),
         # ('Grenoble', 45.189712, 5.723413),
         # ('Chambery', 45.573669, 5.927933),
         # ('Lyon', 45.751703, 4.838691),
-        ('Constanz',47.670897, 9.173335),
+        # ('Constanz',47.670897, 9.173335),
         ('Besancon', 47.238605, 6.024600),
         ('Dijon', 47.322436, 5.038421),
         # ('Domodossola', 46.111880, 8.298555),
         ('Locarno', 46.169088, 8.786945),
-        ('Varese', 45.820100, 8.824963),
+        # ('Varese', 45.820100, 8.824963),
         ('Bergamo', 45.699911, 9.677642),
         # ('Brescia',45.540414, 10.218764),
         ('Lausanne', 46.519610, 6.628720),
-        ('Ivrea',45.466663, 7.881943),
+        # ('Ivrea',45.466663, 7.881943),
         ('St Moritz',46.490273, 9.833650),
         # ('Verbania', 45.928402, 8.555404),
         ('Turin', 45.068369, 7.678724),
@@ -808,23 +820,29 @@ def get_coordinates_swiss_locations(locations='radars', proj4stringCH=None):
         coordinates = [
         ('Berner Prealps', 46.644444, 7.641923),
         ('Glarner Prealps', 47.027443, 9.066961),
-        ('Ticino', 46.347581, 8.732543 ),
+        ('Ticino', 46.330798, 8.783747),
         ('Plateau', 47.150606, 7.985627),
         ('Berner \n Jura', 47.188765, 7.163854),
         ('Jura \n Vaudois', 46.633969, 6.315448),
         ('Central \n Alps', 46.631409, 8.383590),
-        ('Vosges', 48.022662, 6.885191),
-        ('Black Forest', 47.877341, 8.023283),
+        ('Vosges', 48.012662, 6.885191),
+        ('Black \n Forest', 47.877341, 8.023283),
         ('Savoy', 45.515406, 6.419615),
-        ('Upper Savoy', 46.058678, 6.386667),
+        ('Upper \n Savoy', 46.058678, 6.386667),
         ('Simplon', 46.251999, 8.030979),
         ('L. Magg.', 45.980404, 8.653914),
+        ('L. Constance',47.636015, 9.387289),
+        ('L. Geneva', 46.406273, 6.553283),
         ('Orobie Alps', 45.993991, 9.734690),
+        ('Aosta \n valley', 45.740531, 7.360523),
+        ('Po Plain', 45.470641, 8.593407),
         ('Grisons', 46.697617, 9.633758),
         ('Valais', 46.193337, 7.466644),
+        ('Mont \n Blanc', 45.832736, 6.865442),
+        ('Monte \n Rosa', 45.935122, 7.865444),
         ('FRANCE', 47.001804, 5.424870),
         ('ITALY', 45.639623, 8.504649),
-        ('AUSTRIA', 47.232686, 9.923111),
+        ('AUSTRIA', 47.162365, 10.014188, 9.923111),
         ('GERMANY',48.008381, 9.363776)
         ]
     else:
@@ -849,16 +867,22 @@ def get_coordinates_swiss_locations(locations='radars', proj4stringCH=None):
 	
     return locx, locy, labels 
 
-def draw_radars(ax, fontsize=10, marker='^', markersize=15, color='r', only_location=False):
+def draw_radars(ax, which=['LEM','DOL','ALB','PPM','WEI'], fontsize=10, marker='^', markersize=15, markercolor='r', bboxcolor='', only_location=False):
     # Draw location of radars
     loc_x, loc_y, loc_l = get_coordinates_swiss_locations(locations='radars')
-
-    ax.scatter(loc_x, loc_y, c=color, marker=marker, s=markersize) # radars
+    
+    for label,x,y in zip(loc_l, loc_x, loc_y):
+        if label in which:
+            ax.scatter(x, y, c=markercolor, marker=marker, s=markersize) # radars
     
     if only_location == False:
         for label, x, y in zip(loc_l, loc_x, loc_y):
-            ax.annotate(label, xy=(x,y), xytext=(7,-2), textcoords = 'offset points', fontsize=fontsize, bbox=dict(boxstyle="square", fc="w"),)
-
+            if label in which:
+                if len(bboxcolor) > 0:
+                    ax.annotate(label, xy=(x,y), xytext=(7,-2), textcoords = 'offset points', fontsize=fontsize, bbox=dict(boxstyle="square", fc=bboxcolor),)
+                else:
+                    ax.annotate(label, xy=(x,y), xytext=(7,-2), textcoords = 'offset points', fontsize=fontsize)
+            
 def draw_cities(ax, fontsize=10, marker='o', markersize=5, color='k'):
     # Draw location of major cities
     loc_x, loc_y, loc_l = get_coordinates_swiss_locations(locations='cities')
@@ -876,9 +900,13 @@ def draw_regions(ax, fontsize=11, color='r'):
             rotation = 30
         elif (label == 'L. Magg.'):
             rotation = 60
+        elif (label == 'L. Constance'):
+            rotation = -30
+        elif (label == 'L. Geneva'):
+            rotation = 15
         else:
             rotation = 0
-        ax.annotate(label, xy = (x, y), xytext = (0, 0), rotation=rotation, ha='center', va='center', textcoords = 'offset points',fontsize=fontsize)
+        ax.annotate(label, xy = (x, y), xytext = (0, 0), style='italic', rotation=rotation, ha='center', va='center', textcoords = 'offset points',fontsize=fontsize)
         
 def extract_field_values_at_coords(field_flat, all_field_coordinates, location_coordinates, verbose=1):      
     '''
@@ -920,3 +948,16 @@ def extract_field_values_at_coords(field_flat, all_field_coordinates, location_c
             update_progress((box+1)/nrCoordinates, processName = "Progress")
         
     return(location_values_array)
+
+def centers(bins):
+    return np.vstack([bins[:-1], bins[1:]]).mean(axis=0)
+    
+def transformSwissToStandard(xc,yc):
+    x=xc-255
+    y=640-(yc+160)
+    return(x,y)
+
+def transformStandardToSwiss(x,y):                                                                                         
+    xc=x+255
+    yc=640-(y+160)
+    return(xc,yc)
