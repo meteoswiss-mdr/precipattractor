@@ -15,21 +15,21 @@ username = getpass.getuser()
 import time_tools_attractor as ti
 
 ################################
-timeStartStr = '201604010000'
-timeEndStr =   '201604270000'
+timeStartStr = '201708311400'
+timeEndStr =   '201708312300'
 timeAccumMin = 60
-product = 'CPCH' #'CPCH'
+product = 'CPC' #'CPCH'
 inBaseDir = "/store/msrad/radar/swiss/data/"
 outBaseDir = "/scratch/" + username + "/data/"
 tempSampHours = 24 # Temporal sampling for files 
 
 ########GET ARGUMENTS FROM CMD LINE####
 parser = argparse.ArgumentParser(description='Copy and unzip radar data (from store to scratch).')
-parser.add_argument('-start', default='201604010000', type=str,help='Start time of the period: YYYYMMDDHHmmSS')
-parser.add_argument('-end', default='201604010000', type=str,help='End time of the period: YYYYMMDDHHmmSS')
+parser.add_argument('-start', default='201708310000', type=str,help='Start time of the period: YYYYMMDDHHmmSS')
+parser.add_argument('-end', default='201709010000', type=str,help='End time of the period: YYYYMMDDHHmmSS')
 parser.add_argument('-product', default='RZC', type=str,help='Which radar rainfall product to use (AQC, CPC, etc).')
 parser.add_argument('-accum', default=5, type=int,help='Accumulation time of the product [minutes].')
-parser.add_argument('-username', default='lforesti', type=str,help='')
+parser.add_argument('-username', default='ned', type=str,help='')
 
 args = parser.parse_args()
 
@@ -67,7 +67,7 @@ while timeLocal <= timeEnd:
 
     subDir = str(year) + "/" + yearDayStr + "/"
     fileName = product + yearDayStr + ".zip"
-
+    
     inFile = inBaseDir + subDir + fileName
     outDir = outBaseDir + subDir
 
@@ -91,6 +91,8 @@ while timeLocal <= timeEnd:
         elif product == 'HZT':
             # Unzip only 3-hourly analyses
             cmd = 'unzip -q -o ' + outFile + ' "*.800"' + ' -d ' + outDir
+        elif product == 'CPC':
+            cmd = 'unzip -o ' + outFile + ' "*_00005.801.gif"' + ' -d ' + outDir
         else:
             cmd = 'unzip -q -o ' + outFile + ' "*_' + timeAccumMinStr + '."*' + ' -d ' + outDir
         print(cmd)
