@@ -36,7 +36,7 @@
 # In core data
 #-------------
 &Process
-  in_file="<pathToFcst>laf<analysisRun>00"
+  in_file="<pathToFcst><referenceRun>"
   out_type = "INCORE" 
 /
 &Process in_field    = "FR_LAND" /
@@ -46,11 +46,11 @@
 # Extraction 
 # ----------
 &Process
-  in_file = "<pathToFcst>laf<analysisRun><HH>",
+  in_file = "<pathToFcst><loopFile>",
   out_file = "<pathToOutput>",
   in_regrid_target = "swiss,255500,-159500,964500,479500,1000,1000",
   in_regrid_method="next_neighbour,square,<resKm>" 
-  out_type="NETCDF"
-  tstart = 0, tstop=23, tincr=1
+  out_type="NETCDF"<epspars>
+  tstart = <tstart>, tstop=<tstop>, tincr=<tincr>
 /
 &Process in_field = "<fieldName>"<toper>, regrid=.true./
