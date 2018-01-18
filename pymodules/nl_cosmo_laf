@@ -50,6 +50,7 @@
   out_file = "<pathToOutput>",
   in_regrid_target = "swiss,255500,-159500,964500,479500,1000,1000",
   in_regrid_method="next_neighbour,square,<resKm>" 
+  !in_regrid_method="linear_fit,square,1.5" 
   out_type="NETCDF"
   tstart = 0, tstop=23, tincr=1
 /

@@ -68,7 +68,8 @@ def run_fieldextra_analysis(analysisTimeStr,
     referenceFileName = gribDir + 'laf' + analysisTime.strftime('%Y%m%d') + '00'
     if os.path.isfile(referenceFileName) == False:
         print('Error: %s does not exists.' % referenceFileName)
-        sys.exit()
+        outFile = referenceFileName
+        return(outFile)
 
     # build full path to output forecast file
     fcstName = modelName + '_' + fieldName + '_' + analysisTime.strftime('%Y%m%d')
