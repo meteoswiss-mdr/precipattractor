@@ -613,14 +613,46 @@ def plot_polar_axes_wind(ax2):
             ax.text(x_txt,y_txt,u'%i\N{DEGREE SIGN}'%para,transform=ax.transAxes,horizontalalignment='center',verticalalignment='center')
 
 def deg2degN(degrees):
+    '''
+    Conversion from trigonometrical degrees (0->E) to degrees north (wind direction convention, 0->N)
+    [N=90, E=0, S=270, W=180] -> [N=0, E=90, S=180, W=270]
+    '''
     degreesN = 90-degrees
     
     # Make them all positive (0-360)
     signIdx = (np.sign(degreesN) == -1)
-    degreesN[signIdx] = 360 + degreesN[signIdx]
+    if type(degreesN) == list:
+        degreesN = np.array(degreesN)
+        degreesN[signIdx] = 360 + degreesN[signIdx]
+        degreesN = degreesN.tolist()
+    elif type(degrees) == np.ndarray: 
+        degreesN[signIdx] = 360 + degreesN[signIdx]
+    else:
+        if signIdx == -1:
+            degreesN = 360 + degreesN
+        
     return degreesN
+
+def degN2deg(degreesN):
+    '''
+    Conversion from degrees north (wind direction convention, 0->N) to trigonometrical degrees (0->E)
+    [N=0, E=90, S=180, W=270] -> [N=90, E=0, S=270, W=180]
+    '''
+    degrees = 360 - degreesN + 90
     
-def deg2compass(arrayDegrees,stringType='short'):
+    if type(degrees) == list: 
+        degrees = np.array(degrees)
+        degrees[degrees>=360] = degrees[degrees>=360] - 360
+        degrees = degrees.tolist()
+    elif type(degrees) == np.ndarray: 
+        degrees[degrees>=360] = degrees[degrees>=360] - 360
+    else:
+        if degrees >= 360:
+            degrees - 360
+    
+    return degrees
+    
+def deg2compass(arrayDegrees, stringType='short'):
     
     if stringType == 'short':
         arr=["N","NNE","NE","ENE","E","ESE", "SE", "SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"]
@@ -838,6 +870,7 @@ def get_coordinates_swiss_locations(locations='radars', proj4stringCH=None):
         ('Po Plain', 45.470641, 8.593407),
         ('Grisons', 46.697617, 9.633758),
         ('Valais', 46.193337, 7.466644),
+        #('Rhine \n valley', 48.309796, 7.598972),
         ('Mont \n Blanc', 45.832736, 6.865442),
         ('Monte \n Rosa', 45.935122, 7.865444),
         ('FRANCE', 47.001804, 5.424870),
@@ -961,3 +994,16 @@ def transformStandardToSwiss(x,y):
     xc=x+255
     yc=640-(y+160)
     return(xc,yc)
+    
+def add_plus_array(clevs, fmt="%.1f"):
+    score = lambda i: ("+" if i > 0 else "") + fmt % i
+    clevsTicks = []
+    for i in range(0,len(clevs)):
+        clevsTicks.append(score(clevs[i]))
+
+def elements_in_list(small_list, large_list):
+    '''
+    Finds whether any of the items in small_list is contained in large_list
+    '''
+    b = any(item in large_list for item in small_list)        
+    return(b)

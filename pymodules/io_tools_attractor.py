@@ -354,8 +354,9 @@ def read_gif_image(timeStr, product='AQC', minR = 0.08, fftDomainSize = 512, res
           
             # Create mask radar composite
             mask = np.ones(rainrate.shape)
-            mask[rainrate != noData] = np.nan
-            mask[rainrate == noData] = 1
+            isNaN = (rainrate == noData)
+            mask[~isNaN] = np.nan
+            mask[isNaN] = 1
 
             # Set lowest rain thresholds
             if (minR > 0.0) and (minR < 500.0):
@@ -371,6 +372,9 @@ def read_gif_image(timeStr, product='AQC', minR = 0.08, fftDomainSize = 512, res
             condition = rainrateNans < rainThreshold
             rainrateNans[condition] = np.nan
             
+            import warnings
+            warnings.filterwarnings("ignore", category=RuntimeWarning) 
+
             # fills no-rain with zeros and missing data with nans (for unconditional statistics)
             condition = rainrate < 0
             rainrate[condition] = np.nan
@@ -565,7 +569,7 @@ def read_hzt_match_maple_archive(data, startTimeStr = '', endTimeStr = '', dict_
     task
     add: Add new columns with HZT data
     replace: Completely replace columns with HZT data
-    complete: Only fill colmns with HZT data where there are NaNs
+    complete: Only fill columns with HZT data where there are NaNs
     
     '''
     nrColsData = data.shape[1]

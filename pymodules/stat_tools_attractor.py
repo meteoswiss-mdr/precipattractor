@@ -1224,5 +1224,289 @@ def select_independent_times(timeStampDtArray, distancesArray, N=5, indepTimeHou
     
     return(indepIndices, indepDateTimes)
     
+def scores_det_cat_fcst(pred,y):
     
+    ##############################
     
+    ## purpose:
+    # calculate scores (simple + skill) for deterministic categorical forecasts
+    
+    ## input:
+    # pred: 1d array with the predictions
+    # y: 1d array with the true values
+
+    ## output:
+    # ss: calculated simple + skill scores
+    # ss_names: namelist of the calculated scores
+    
+    ##############################
+
+
+    ##############################        
+    ## calculate hits, misses, false positives, correct rejects   
+    ##############################
+    
+    H_idx = np.logical_and(pred==1,y==1) # correctly predicted precip
+    F_idx = np.logical_and(pred==1,y==0) # predicted precip even though none there
+    M_idx = np.logical_and(pred==0,y==1) # predicted no precip even though there was
+    R_idx = np.logical_and(pred==0,y==0) # correctly predicted no precip
+
+    H = sum(H_idx).astype(float)
+    M = sum(M_idx).astype(float)
+    F = sum(F_idx).astype(float)
+    R = sum(R_idx).astype(float)
+    tot = H+M+F+R
+
+
+    print('H:',H/tot*100,'M:',M/tot*100,'F:',F/tot*100,'R:',R/tot*100)
+
+    
+    ##############################        
+    ## calculate simple scores 
+    ##############################
+    
+    POD = H/(H+M) # probability of detection
+    FAR = F/(H+F) # false alarm ratio
+    FA = F/(F+R) # false alarm rate = prob of false detection
+    s = (H+M)/(H+M+F+R) # base rate = freq of observed events
+
+    #POR = R/(R+F) # probability of rejection
+    #FRR = M/(M+R) # false rejection ratio
+    #FB = (H+F)/(H+M) # frequency bias: systematic error only
+
+    ACC = (H+R)/(H+M+F+R) #accuracy (fraction correct) <- attention: not really suitable measure for rare events:
+            # large values for conservative fcst there (because events / non-events treated symmetrically)
+    CSI = H/(H+M+F) # critical success index: fraction of all fcsted or observed events that were correct
+            # (asymmetric between events / non-events)
+
+
+    ##############################        
+    ## calculate skill scores 
+    ##############################
+    HSS = 2*(H*R-F*M)/((H+M)*(M+R)+(H+F)*(F+R)) # Heidke Skill Score (-1 < HSS < 1) < 0 implies no skill
+    # CSI2 = POD/(1+FA*(1-s)/s) # just entered for cross reference test -> ok :)
+    # HSS2 = 2*s*(1-s)*(POD-FA)/(s+s*(1-2*s)*POD+(1-s)*(1-2*s)*FA) # just entered for cross reference test -> ok :)
+
+    HK = POD-FA #Hanssen-Kuipers Discriminant
+    GSS = (POD-FA)/((1-s*POD)/(1-s)+FA*(1-s)/s) # Gilbert Skill Score
+    #aref = (H+M)*(H+F)/(H+F+M+R)
+    #GSS2 = (H-aref)/(H-aref+F+M) # jep, also GSS is calculated correctly
+
+    #SEDI = (np.log(FA)-np.log(POD)+np.log(1-POD)-np.log(1-FA))/(np.log(FA)+np.log(POD)+np.log(1-POD)+np.log(1-FA))
+        # Symmetric extremal dependence index: not a form of a SS, specifically designed for rare events
+
+    ss = [POD,FA,FAR,ACC,CSI,HSS,HK,GSS] # all explained in Lecture Frei except POR & FRR (-> paper
+                # Roebling&Holleman2009)
+   
+    ss_names = ['POD','FA','FAR','ACC','CSI','HSS','HK','GSS']
+    
+    print('HK:',HK, 'HSS:', HSS)
+    del H_idx, F_idx, M_idx, R_idx, H, M, F, R, tot
+    
+    return ss,ss_names
+
+def elements_in_list(small_list, large_list):
+    '''
+    Finds whether any of the items in small_list is contained in large_list
+    '''
+    b = any(item in large_list for item in small_list)        
+    return(b)
+    
+from scipy.stats import spearmanr, pearsonr
+def scores_det_cont_fcst(pred, o, 
+scores_list=['ME_add','RMSE_add','RV_add','corr_s','corr_p','beta','ME_mult','RMSE_mult','RV_mult'], offset=0.01):
+    '''
+    ##############################
+    
+    Purpose:
+    calculate scores (simple + skill) for deterministic continuous forecasts
+    
+    Input:
+    pred: 1d array with the predictions
+    o: 1d array with the true values
+    scores_list: list of scores to compute
+
+    Output:
+    ss: calculated simple + skill scores
+    ss_names: namelist of the calculated scores
+    
+    '''
+    ##############################
+    isNaN = np.isnan(pred) | np.isnan(o)
+    pred = pred[~isNaN]
+    o = o[~isNaN]
+    
+    N = o.shape[0]
+    s_o = np.sqrt(1.0/N*sum((o-o.mean())**2))
+    s_pred = np.sqrt(1.0/N*sum((pred-pred.mean())**2)) # sample standard deviation of prediction
+    
+    # Compute additive and multiplicative residuals
+    add_res = pred-o # additive residuals
+    b = elements_in_list(['ME_mult', 'RMSE_mult', 'RV_mult'], scores_list)
+    if b:
+        mult_res = 10.0*np.log10((pred + offset)/(o + offset))# multiplicative residuals
+        if (np.sum(pred < 0) > 0) or (np.sum(o < 0) > 0):
+            print('Beware that pred and o should not contain negative values to compute the multiplicative residuals.')
+    
+    scores = []
+    scores_list_sorted = []
+    
+    # mean error (stm called bias... but somehow doesn't add up with multiplicative bias from Christoph Frei's lecture)
+    if 'ME_add' in scores_list:
+        ME_add = np.mean(add_res)
+        scores.append(ME_add)
+        scores_list_sorted.append('ME_add')
+    
+    if 'ME_mult' in scores_list:
+        ME_mult = np.mean(mult_res)
+        scores.append(ME_mult)
+        scores_list_sorted.append('ME_mult')
+    
+    # root mean squared errors
+    if 'RMSE_add' in scores_list:
+        RMSE_add = np.sqrt(1.0/N*sum((add_res)**2))
+        scores.append(RMSE_add)
+        scores_list_sorted.append('RMSE_add')
+    
+    if 'RMSE_mult' in scores_list:
+        RMSE_mult = np.sqrt(1.0/N*sum((mult_res)**2))
+        scores.append(RMSE_mult)
+        scores_list_sorted.append('RMSE_mult')
+    
+    # reduction of variance scores (not sure whether even makes sense in multiplicative space)
+    if 'RV_add' in scores_list:
+        RV_add = 1.0 - 1.0/N*sum((add_res)**2)/s_o**2
+        scores.append(RV_add)
+        scores_list_sorted.append('RV_add')
+    
+    if 'RV_mult' in scores_list:
+        dBo = 10*np.log10(o+offset)
+        s_dBo = np.sqrt(1.0/N*sum((dBo-dBo.mean())**2))
+        RV_mult = 1.0-1.0/N*sum((mult_res)**2)/s_dBo**2
+        scores.append(RV_mult)
+        scores_list_sorted.append('RV_mult')
+    
+    # spearman corr (rank correlation)
+    if 'corr_s' in scores_list:
+        corr_s = spearmanr(pred,o)[0]
+        scores.append(corr_s)
+        scores_list_sorted.append('corr_s')
+    
+    # pearson corr
+    if 'corr_p' in scores_list:
+        corr_p = pearsonr(pred,o)[0]
+        scores.append(corr_p)
+        scores_list_sorted.append('corr_p')
+        
+    # beta (linear regression slope)
+    if 'beta' in scores_list:
+        beta = s_o/s_pred*corr_p
+        scores.append(beta)
+        scores_list_sorted.append('beta')
+    
+    #scores_dict = dict(zip(scores_list, scores))
+    
+    return scores, scores_list_sorted
+ 
+def plot_2dhistogram(x_array, y_array, step_x=None, step_y=None, xlims=None, ylims=None, cmap='jet', add_regress=True):
+    '''
+    Function to plot a 2D histogram, e.g. to visualize a scatterplot of observed vs predicted values.
+    The function returns the axes so that you can set title, xlabel and ylabel, e.g.
+    ax.set_xlabel('Observed growth and decay [dB]')
+    ax.set_ylabel('Predicted growth and decay [dB]')
+    ax.set_title('MLP predictions against observations')
+    '''
+    
+    # X and Y lims
+    if xlims == None:
+        xlims = [np.nanmin(x_array), np.nanmax(x_array)]
+    if ylims == None:
+        ylims = [np.nanmin(y_array), np.nanmax(y_array)]
+    
+    # Step size for 2D hist
+    if step_x == None:
+        bins_x = np.linspace(xlims[0], xlims[1], num=40)
+    else:
+        bins_x = np.arange(xlims[0], xlims[1]+step_x, step_x)
+    
+    if step_y == None:
+        bins_y = np.linspace(ylims[0], ylims[1], num=40)
+    else:
+        bins_y = np.arange(ylims[0], ylims[1]+step_y, step_y)    
+        
+    ########
+    # Compute 2D histogram
+    H, xedges, yedges = np.histogram2d(x_array, y_array, bins=(bins_x, bins_y))
+    
+    # Mask histogram for zeros
+    import numpy.ma as ma
+    H[H==0] = np.nan
+    H = ma.masked_where(np.isnan(H),H)
+    X, Y = np.meshgrid(xedges, yedges)
+    
+    # Plot 2D histogram
+    plt.figure()
+    ax = plt.subplot(111)
+    
+    import matplotlib as mpl
+    pc = ax.pcolormesh(X, Y, H.T, norm=mpl.colors.LogNorm(), cmap=plt.get_cmap(cmap))
+    plt.xlim(xlims)
+    plt.ylim(ylims)
+    plt.colorbar(pc)
+    
+    if add_regress:
+        add_regression_line_scores(x_array, y_array, ax)
+    
+    return(ax)
+
+def add_regression_line_scores(x_array, y_array, ax):
+    '''
+    Function to add a regression line to a scatterplot / 2D histogram + a legend with scores
+    '''
+    ########
+    fmt2 = "%.2f"
+    
+    xmin, xmax = ax.get_ylim()
+    xlims = [xmin, xmax]
+    ymin, ymax = ax.get_ylim()
+    ylims = [ymin, ymax]
+     
+    # Plot line perfect regression
+    ax.plot(xlims, ylims, 'k--', linewidth=0.5)
+    ax.axhline(y=0, color='k', linewidth=0.5)
+    ax.axvline(x=0, color='k', linewidth=0.5)
+    
+    # Plot regression line
+    beta, intercept, rho, = compute_beta(x_array, y_array)
+    ax.plot(xlims, intercept+ beta*np.array(xlims), 'k--', linewidth=0.5)
+    
+    ################################
+    # Compute statistics and errors
+    scores_list = ['corr_s', 'RMSE_add'] #, 'RV_add']
+    scores, scores_list = scores_det_cont_fcst(x_array, y_array, scores_list)
+    
+    text_legend = ''
+    scores_names = scores_list_names(scores_list)
+    for i in range(len(scores_names)):
+        text_legend += scores_names[i] + ' = ' + (fmt2 % (scores[i])) + '\n'
+        
+    # Add legend with scores
+    t = ax.text(0.95, 0.15, text_legend, transform=ax.transAxes, fontsize=10, horizontalalignment='right')   
+    t.set_bbox((dict(facecolor='white', alpha=0.7, edgecolor='white')))
+
+    return(ax)
+
+def scores_list_names(scores_list_in):
+    '''
+    Replaces the scores_list with netter names for plotting.
+    '''
+    scores_list = ['ME_add','RMSE_add','RV_add','corr_s','corr_p','beta','ME_mult','RMSE_mult','RV_mult']
+    scores_names = ['ME','RMSE','RV','SCORR','PCORR','beta','ME_mult','RMSE_mult','RV_mult']
+    
+    scores_names_out = []
+    for i in range(len(scores_list_in)):
+        for j in range(len(scores_list)):
+            if scores_list[j] == scores_list_in[i]:
+                scores_names_out.append(scores_names[j])
+        
+    return(scores_names_out)    
