@@ -14,11 +14,14 @@ from __future__ import print_function
 import sys
 import time
 import numpy as np
+import numpy.ma as ma
+
 import math
 import pywt
 
 import matplotlib.pyplot as plt
-
+import matplotlib as mpl
+    
 from scipy import stats, fftpack
 import scipy.signal as ss
 import scipy.ndimage as ndimage
@@ -1332,11 +1335,15 @@ scores_list=['ME_add','RMSE_add','RV_add','corr_s','corr_p','beta','ME_mult','RM
     
     '''
     ##############################
+    # Flatten array if 2D
+    pred = pred.flatten()
+    o = o.flatten()
+    
     isNaN = np.isnan(pred) | np.isnan(o)
     pred = pred[~isNaN]
     o = o[~isNaN]
     
-    N = o.shape[0]
+    N = len(o)
     s_o = np.sqrt(1.0/N*sum((o-o.mean())**2))
     s_pred = np.sqrt(1.0/N*sum((pred-pred.mean())**2)) # sample standard deviation of prediction
     
@@ -1367,6 +1374,7 @@ scores_list=['ME_add','RMSE_add','RV_add','corr_s','corr_p','beta','ME_mult','RM
         RMSE_add = np.sqrt(1.0/N*sum((add_res)**2))
         scores.append(RMSE_add)
         scores_list_sorted.append('RMSE_add')
+        print(RMSE_add, N)
     
     if 'RMSE_mult' in scores_list:
         RMSE_mult = np.sqrt(1.0/N*sum((mult_res)**2))
@@ -1439,7 +1447,6 @@ def plot_2dhistogram(x_array, y_array, step_x=None, step_y=None, xlims=None, yli
     H, xedges, yedges = np.histogram2d(x_array, y_array, bins=(bins_x, bins_y))
     
     # Mask histogram for zeros
-    import numpy.ma as ma
     H[H==0] = np.nan
     H = ma.masked_where(np.isnan(H),H)
     X, Y = np.meshgrid(xedges, yedges)
@@ -1448,7 +1455,6 @@ def plot_2dhistogram(x_array, y_array, step_x=None, step_y=None, xlims=None, yli
     plt.figure()
     ax = plt.subplot(111)
     
-    import matplotlib as mpl
     pc = ax.pcolormesh(X, Y, H.T, norm=mpl.colors.LogNorm(), cmap=plt.get_cmap(cmap))
     plt.xlim(xlims)
     plt.ylim(ylims)
@@ -1498,7 +1504,7 @@ def add_regression_line_scores(x_array, y_array, ax):
 
 def scores_list_names(scores_list_in):
     '''
-    Replaces the scores_list with netter names for plotting.
+    Replaces the scores_list with better names for plotting.
     '''
     scores_list = ['ME_add','RMSE_add','RV_add','corr_s','corr_p','beta','ME_mult','RMSE_mult','RV_mult']
     scores_names = ['ME','RMSE','RV','SCORR','PCORR','beta','ME_mult','RMSE_mult','RV_mult']
@@ -1509,4 +1515,65 @@ def scores_list_names(scores_list_in):
             if scores_list[j] == scores_list_in[i]:
                 scores_names_out.append(scores_names[j])
         
-    return(scores_names_out)    
+    return(scores_names_out)
+
+def predict_quantile(model, X, percentile=50):
+    '''
+    Predict given quantile based on random forest.
+    '''
+    ## LOOP over the prediction of each tree for that sample
+    preds = []
+    for pred in model.estimators_:
+        preds.append(pred.predict(X))
+    preds = np.array(preds).T
+    preds_quantile = np.percentile(preds, percentile, axis=1)
+    
+    return(preds_quantile)
+
+def prediction_intervals(model, X, percentile=95):
+    '''
+    Function to compute the prediction interval from random forests.
+    '''
+    err_down = []
+    err_up = []
+    ## LOOP over each sample
+    for i in range(len(X)):
+        preds = []
+        ## LOOP over the prediction of each tree for that sample
+        for pred in model.estimators_:
+            preds.append(pred.predict(X[i,:].reshape(1, -1)))
+        
+        err_down.append(np.percentile(preds, 50 - percentile/2.0 ))
+        err_up.append(np.percentile(preds, 50 + percentile/2.0))
+    return err_down, err_up
+
+def prediction_intervals_fast(model, X, percentile=95):
+    '''
+    Function to compute the prediction interval from random forests.
+    No need to loop over number of samples.
+    '''
+    err_down = []
+    err_up = []
+    preds = []
+    ## LOOP over the prediction of each tree for that sample
+    for pred in model.estimators_:
+        preds.append(pred.predict(X))
+    
+    preds = np.array(preds).T
+    err_down = np.percentile(preds, 50 - percentile/2.0, axis=1)
+    err_up = np.percentile(preds, 50 + percentile/2.0, axis=1)
+    return err_down, err_up
+    
+def pred_interval_evaluation(y_obs, err_down, err_up=None):
+    '''
+    Function to evaluate the prediction intervals (quantiles).
+    If both err_down and err_up ar passed it counts how many observations fall within that interval.
+    If only err_down is passed it counts how many observations fall below that value.
+    '''
+    if (err_up == None):
+        correct = (y_obs <= err_down)
+    else:
+        correct = (err_down <= y_obs) & (y_obs <= err_up)
+    correctPerc = np.nansum(correct)/len(correct)*100
+    return correctPerc
+    

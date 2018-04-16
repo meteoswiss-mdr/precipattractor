@@ -749,6 +749,7 @@ def read_csv(fileName, header=True):
     If the file contains a header for the variable names use header=True.
     If it contains only the data use header=False
     '''
+    
     with open(fileName, 'r') as csvfile:
         spamreader = csv.reader(csvfile, delimiter=',', quotechar='|')
         arrayData = list(spamreader)

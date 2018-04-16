@@ -15,6 +15,7 @@ import datetime
 import numpy as np
 import time
 import sys
+import math
 
 fmt1 = "%.1f"
 fmt2 = "%.2f"
@@ -236,7 +237,7 @@ def timestring_array2datetime_array(arrayTimeStampsStr):
         List of datetime objects
     '''
     
-    timeStamps = np.array(arrayTimeStampsStr,dtype=int)
+    timeStamps = np.array(arrayTimeStampsStr, dtype=int)
     timeStampsStr = np.array(list(map(str,timeStamps)))
     
     arrayTimeStampsDt = []
@@ -393,4 +394,11 @@ def generate_datetime_list(startDt, endDt, stepMin=5):
         localTime = localTime + datetime.timedelta(minutes=stepMin)
         
     return(listDt)
-        
+
+def daytime2circular(dayHour):
+    dayHour = np.array(dayHour, dtype=float)
+    daytimeSin = np.sin(2.0*math.pi*dayHour/24.0)
+    daytimeCos = np.cos(2.0*math.pi*dayHour/24.0)
+    
+    return(daytimeSin,daytimeCos)
+    
