@@ -873,6 +873,9 @@ def get_coordinates_swiss_locations(locations='radars', proj4stringCH=None):
         #('Rhine \n valley', 48.309796, 7.598972),
         ('Mont \n Blanc', 45.832736, 6.865442),
         ('Monte \n Rosa', 45.935122, 7.865444),
+        ]
+    elif locations == 'countries':    
+        coordinates = [
         ('FRANCE', 47.001804, 5.424870),
         ('ITALY', 45.639623, 8.504649),
         ('AUSTRIA', 47.162365, 10.014188, 9.923111),
@@ -906,7 +909,7 @@ def draw_radars(ax, which=['LEM','DOL','ALB','PPM','WEI'], fontsize=10, marker='
     
     for label,x,y in zip(loc_l, loc_x, loc_y):
         if label in which:
-            ax.scatter(x, y, c=markercolor, marker=marker, s=markersize) # radars
+            ax.scatter(x, y, c=markercolor, marker=marker, s=markersize, edgecolors='k') # radars
     
     if only_location == False:
         for label, x, y in zip(loc_l, loc_x, loc_y):
@@ -916,15 +919,15 @@ def draw_radars(ax, which=['LEM','DOL','ALB','PPM','WEI'], fontsize=10, marker='
                 else:
                     ax.annotate(label, xy=(x,y), xytext=(7,-2), textcoords = 'offset points', fontsize=fontsize)
             
-def draw_cities(ax, fontsize=10, marker='o', markersize=5, color='k'):
+def draw_cities(ax, fontsize=10, marker='o', markersize=5, markercolor='k'):
     # Draw location of major cities
     loc_x, loc_y, loc_l = get_coordinates_swiss_locations(locations='cities')
     
-    ax.scatter(loc_x, loc_y, c=color, marker=marker, s=markersize)
+    ax.scatter(loc_x, loc_y, c=markercolor, marker=marker, s=markersize)
     for label, x, y in zip(loc_l, loc_x, loc_y):
         ax.annotate(label, xy = (x, y), xytext = (7, -2), textcoords = 'offset points',fontsize=fontsize)
 
-def draw_regions(ax, fontsize=11, color='r'):        
+def draw_regions(ax, fontsize=11, color='k'):        
     # Draw location of regions
     loc_x, loc_y, loc_l = get_coordinates_swiss_locations(locations='regions')
     
@@ -939,7 +942,15 @@ def draw_regions(ax, fontsize=11, color='r'):
             rotation = 15
         else:
             rotation = 0
-        ax.annotate(label, xy = (x, y), xytext = (0, 0), style='italic', rotation=rotation, ha='center', va='center', textcoords = 'offset points',fontsize=fontsize)
+        ax.annotate(label, xy = (x, y), xytext = (0, 0), style='italic', color=color, rotation=rotation, ha='center', va='center', textcoords = 'offset points',fontsize=fontsize)
+
+def draw_countries(ax, fontsize=11, color='k'):        
+    # Draw location of regions
+    loc_x, loc_y, loc_l = get_coordinates_swiss_locations(locations='countries')
+    
+    for label, x, y in zip(loc_l, loc_x, loc_y):
+        rotation = 0
+        ax.annotate(label, xy = (x, y), xytext = (0, 0), style='italic', color=color, rotation=rotation, ha='center', va='center', textcoords = 'offset points',fontsize=fontsize)
         
 def extract_field_values_at_coords(field_flat, all_field_coordinates, location_coordinates, verbose=1):      
     '''
@@ -1000,6 +1011,7 @@ def add_plus_array(clevs, fmt="%.1f"):
     clevsTicks = []
     for i in range(0,len(clevs)):
         clevsTicks.append(score(clevs[i]))
+    return(clevsTicks)
 
 def elements_in_list(small_list, large_list):
     '''
@@ -1007,3 +1019,11 @@ def elements_in_list(small_list, large_list):
     '''
     b = any(item in large_list for item in small_list)        
     return(b)
+    
+def set_yaxis_color(ax, color):
+    '''
+    Function to set all ticks, ticklabels and axis labels to a certain color.
+    '''
+    ax.yaxis.label.set_color(color)
+    [t.set_color(color) for t in ax.yaxis.get_ticklines()]
+    [t.set_color(color) for t in ax.yaxis.get_ticklabels()]
