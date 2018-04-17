@@ -156,6 +156,16 @@ def compute_2d_spectrum(rainfallImage, resolution=1, window=None, FFTmod='NUMPY'
     elif window == 'hanning':
         w1d = np.hanning(minFieldSize)
         w = np.outer(w1d,w1d)
+    elif window == 'flat-hanning':
+        T = minFieldSize/4
+        W = minFieldSize/2
+        B = np.linspace(-W,W,2*W)
+        R = np.abs(B)-T
+        R[R<0]=0.
+        A = 0.5*(1.0 + np.cos(np.pi*R/T))
+        A[np.abs(B)>(2*T)]=0.0
+        w1d = A
+        w = np.outer(w1d,w1d)
     else:
         w = np.ones((fieldSize[0],fieldSize[1]))    
     
@@ -179,9 +189,33 @@ def compute_2d_spectrum(rainfallImage, resolution=1, window=None, FFTmod='NUMPY'
     
     return(psd2d, freq)
 
+def compute_dft_1d_spectrum(rainfallImage, resolution=1, window='flat-hanning'):
+    '''
+    Function to compute the 1D Discrete Fourier Transform power spectrum.
+    
+    Parameters
+    ----------
+    rainfallImage : numpyarray(float)
+        Input 2d array with the rainfall field (or any kind of image)
+    resolution : float
+        Resolution of the image grid (e.g. in km) to compute the Fourier frequencies
+    '''
+    
+    fieldSize = rainfallImage.shape
+    
+
+    # Compute 2D power spectrum
+    
+    psd2d,_ = compute_2d_spectrum(rainfallImage,resolution, window)
+
+    # Radial average
+    psd1d, freq, wavelength = compute_radialAverage_spectrum(psd2d, resolution=1)
+
+    return psd1d, freq, wavelength    
+    
 def compute_dct_1d_spectrum(rainfallImage, resolution=1):
     '''
-    Function to compute the 2D Discrete Cosine Transform power spectrum.
+    Function to compute the 1D Discrete Cosine Transform power spectrum.
     
     Parameters
     ----------

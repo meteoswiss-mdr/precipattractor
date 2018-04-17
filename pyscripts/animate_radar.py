@@ -53,7 +53,7 @@ fmt5 = "%.5f"
 ########SET DEFAULT ARGUMENTS##########
 
 resKm = 1 # To compute FFT frequency
-inBaseDir = '/scratch/lforesti/data/' # directory to read from
+inBaseDir = '/scratch/' + usrName + '/data/' # directory to read from
 outBaseDir = '/scratch/' + usrName + '/tmp/'
 fourierVar = 'dbz' # field on which to perform the fourier analysis ('rainrate' or 'dbz')
 domainSize = 512
@@ -71,9 +71,10 @@ parser.add_argument('-accum', default=5, type=int,help='Accumulation time of the
 parser.add_argument('-temp', default=10, type=int,help='Temporal sampling of the products [minutes].')
 parser.add_argument('-dpi', default=150, type=int,help='Image resolution.')
 parser.add_argument('-delay', default=20, type=int,help='Display the next image after pausing.')
-parser.add_argument('-domainSizeLat', default=512, type=int,help='[km]')
-parser.add_argument('-domainSizeLon', default=512, type=int,help='[km]')
+parser.add_argument('-domainSizeLat', default=512, type=float,help='[km]')
+parser.add_argument('-domainSizeLon', default=512, type=float,help='[km]')
 parser.add_argument('-figsize', default=9, type=float,help='')
+parser.add_argument('-fontsize', default=15, type=float,help='')
 
 
 args = parser.parse_args()
@@ -84,7 +85,8 @@ dpi = args.dpi
 delay = args.delay
 domainSize = (args.domainSizeLat,args.domainSizeLon)
 figsize = args.figsize
-figsize = (figsize, figsize/1.2)
+figsize = (figsize, figsize/1.3)
+fsize = args.fontsize
 
 if (timeAccumMin == 60) | (timeAccumMin == 60*24):
     timeSampMin = timeAccumMin
@@ -135,7 +137,7 @@ cmap.set_over('black',1)
 cmapMask = colors.ListedColormap(['black'])
 
 # Load background DEM image
-dirDEM = '/users/' + usrName + '/scripts/shapefiles'
+dirDEM = '/users/' + usrName + '/pyscripts/shapefiles'
 fileNameDEM = dirDEM + '/ccs4.png'
 isFile = os.path.isfile(fileNameDEM)
 if (isFile == False):
@@ -176,91 +178,18 @@ outDir = outBaseDir + '_frames' + timeStartStr + '/'
 cmd = 'mkdir -p ' + outDir
 os.system(cmd)
 
+radar_observations_10min,_,_ = lf.produce_radar_observation_with_accumulation(startForecastStr, endForecastStr, newAccumulationMin=10)
+
 while timeLocal <= timeEnd:
     ticOneImg = time.clock()
-
-    year, yearStr, julianDay, julianDayStr = ti.parse_datetime(timeLocal)
-    hour = timeLocal.hour
-    minute = timeLocal.minute
-
-    # Create filename for input
-    hourminStr = ('%02i' % hour) + ('%02i' % minute)
-    radarOperWildCard = '?'
-
-    subDir = str(year) + '/' + yearStr + julianDayStr + '/'
-    inDir = inBaseDir + subDir
-    fileNameWildCard = inDir + product + yearStr + julianDayStr + hourminStr + radarOperWildCard + '_' + timeAccumMinStr + '*.gif'
-
-    # Get filename matching regular expression
-    fileName = io.get_filename_matching_regexpr(fileNameWildCard)
-    # Get data quality from fileName
-    dataQuality = io.get_quality_fromfilename(fileName)
-
-    # Check if file exists
-    isFile = os.path.isfile(fileName)
-    if (isFile == False):
-        print('File: ', fileNameWildCard, ' not found.')
+    
+    nextTimeStampStr = ti.datetime2timestring(timeLocal)
+    if product=='RZC':
+        r = io.read_bin_image(nextTimeStampStr,fftDomainSize=domainSize[0])
     else:
-        # Reading GIF file
-        # print('Reading: ', fileName)
-        try:
-            # Open GIF image
-            rain8bit, nrRows, nrCols = io.open_gif_image(fileName)
+        r = io.read_gif_image(nextTimeStampStr,fftDomainSize=domainSize[0],product=product)
             
-            # Get GIF image metadata
-            alb, doe, mle, ppm, wei = io.get_gif_radar_operation(fileName)
-
-            # If metadata are not written in gif file derive them from the quality number in the filename
-            if (alb == -1) & (doe == -1) & (mle == -1) & (ppm == -1) & (wei == -1):
-                alb, doe, mle = io.get_radaroperation_from_quality(dataQuality)
-                
-            # Generate lookup table
-            lut = dt.get_rainfall_lookuptable(noData)
-
-            # Replace 8bit values with rain rates 
-            rainrate = lut[rain8bit]
-
-            if (product == 'AQC') & (timeAccumMin == 5): # AQC is given in millimiters!!!
-                rainrate[rainrate != noData] = rainrate[rainrate != noData]*(60/5)
-            
-            # Get coordinates of reduced domain
-            extent = dt.get_reduced_extent(rainrate.shape[1], rainrate.shape[0], domainSize[0], domainSize[1])
-            Xmin = allXcoords[extent[0]]
-            Ymin = allYcoords[extent[1]]
-            Xmax = allXcoords[extent[2]]
-            Ymax = allYcoords[extent[3]]
-            
-            subXcoords = np.arange(Xmin,Xmax,resKm*1000)
-            subYcoords = np.arange(Ymin,Ymax,resKm*1000)
-            
-            # Select 512x512 domain in the middle
-            rainrate = dt.extract_middle_domain(rainrate, domainSize[0], domainSize[1])
-            rain8bit = dt.extract_middle_domain(rain8bit, domainSize[0], domainSize[1])
-            
-            # Create mask radar composite
-            mask = np.ones(rainrate.shape)
-            mask[rainrate != noData] = np.nan
-            mask[rainrate == noData] = 1
-            
-            # -999 to nan
-            rainrate[rainrate < 0] = np.nan 
-            
-            # Set lowest rain thresholds
-            rainThreshold = 0.08
-            condition = rainrate < rainThreshold
-            rainrate[condition] = rainThreshold
-            
-            # Set all the non-rainy pixels to NaN (for plotting)
-            rainratePlot = np.copy(rainrate)
-            rainratePlot[condition] = np.nan
-            
-            
-            war = 1
-        except IOError:
-            print('File ', fileName, ' not readable')
-            war = -1
-            
-        if war == 1:
+        if r.war > -1:
                   
             ############# PLOTTING #################################
             plt.close("all")
@@ -271,47 +200,33 @@ while timeLocal <= timeEnd:
             rainAx = plt.subplot(111)
             
             # Draw DEM
-            rainAx.imshow(demImg, extent = (Xmin, Xmax, Ymin, Ymax), vmin=100, vmax=3000, cmap = plt.get_cmap('gray'))
+            rainAx.imshow(demImg, extent = r.extent, vmin=100, vmax=3000, cmap = plt.get_cmap('gray'))
            
             # Draw rainfield
-            rainIm = rainAx.imshow(rainratePlot, extent = (Xmin, Xmax, Ymin, Ymax), cmap=cmap, norm=norm, interpolation='nearest')
+            rainIm = rainAx.imshow(r.rainrateNans, extent = r.extent, cmap=r.cmap, norm=r.norm, interpolation='nearest')
             
             # Draw shapefile
             gis.read_plot_shapefile(fileNameShapefile, proj4stringWGS84, proj4stringCH,  ax = rainAx, linewidth = 0.75)
             
                         # Colorbar
-            cbar = plt.colorbar(rainIm, ticks=clevs, spacing='uniform', norm=norm, extend='max', fraction=0.03)
-            cbar.set_ticklabels(clevsStr, update_ticks=True)
-            if (timeAccumMin == 1440):
-                cbar.set_label(r"mm day$^{-1}$")
-            elif (timeAccumMin == 60):
-                cbar.set_label(r"mm h$^{-1}$")    
-            elif (timeAccumMin == 5) and (product == 'AQC'):
-                cbar.set_label(r"mm h$^{-1}$")
-            elif (timeAccumMin == 5):
-                cbar.set_label(r"mm h$^{-1}$ equiv.")
-            else:
-                print('Accum. units not defined.')
-                
-            titleStr = timeLocal.strftime("%Y.%m.%d %H:%M") + ', ' + product + ' rainfall field, Q' + str(dataQuality)
-            # plt.title(titleStr, fontsize=15)
+            cbar = plt.colorbar(rainIm, ticks=r.clevs, spacing='uniform', norm=r.norm, extend='max', fraction=0.03)
+            cbar.set_ticklabels(r.clevsStr, update_ticks=True)
+            cbar.set_label(r"mm h$^{-1}$",fontsize=fsize)
             
             # Draw radar composite mask
-            rainAx.imshow(mask, cmap=cmapMask, extent = (Xmin, Xmax, Ymin, Ymax), alpha = 0.5)
+            rainAx.imshow(r.mask, cmap=r.cmapMask, extent = r.extent, alpha = 0.5)
             
-            # Add product quality within image
-            dataQualityTxt = "Quality = " + str(dataQuality)
             
             # Set X and Y ticks for coordinates
             xticks = np.arange(400, 900, 100)
             yticks = np.arange(0, 500 ,100)
             plt.xticks(xticks*1000, xticks)
             plt.yticks(yticks*1000, yticks)
-            plt.xlabel('Swiss easting [km]')
-            plt.ylabel('Swiss northing [km]')
+            plt.xlabel('Swiss easting [km]',fontsize=fsize)
+            plt.ylabel('Swiss northing [km]',fontsize=fsize)
             
             txt = str(timeLocal.strftime('%Y-%b-%d %H:%M'))
-            rainAx.text(0.98,0.98,txt,backgroundcolor='white', fontsize=12,transform=rainAx.transAxes,ha='right',va='top')  
+            rainAx.text(0.98,0.98,txt,backgroundcolor='white', fontsize=fsize,transform=rainAx.transAxes,ha='right',va='top')
             
             fig.tight_layout()
             
