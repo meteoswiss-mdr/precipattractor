@@ -134,6 +134,54 @@ def compute_beta_sm(logScale, logPower, weights = None):
 def GaussianKernel(v1, v2, sigma):
     return exp(-norm(v1-v2, 2)**2/(2.*sigma**2))
 
+def compute_3d_spectrum(array, resolutions = [10,1,1], window=None, FFTmod='FFTW'):
+       
+    if window is not None:
+        for axis, axis_size in enumerate(array.shape):
+            # set up shape for numpy broadcasting
+            filter_shape = [1, ] * array.ndim
+            filter_shape[axis] = axis_size
+            if window == 'hanning':
+                w = np.hanning(axis_size).reshape(filter_shape)
+            elif window == 'flat-hanning':
+                T = axis_size/4
+                W = axis_size/2
+                B = np.linspace(-W,W,2*W)
+                R = np.abs(B)-T
+                R[R<0]=0.
+                A = 0.5*(1.0 + np.cos(np.pi*R/T))
+                A[np.abs(B)>(2*T)]=0.0
+                w = A.reshape(filter_shape)
+            else:
+                print('Warning: unsupported window type.')
+                w = np.ones(axis_size).reshape(filter_shape)
+            array *= w
+
+    # compute 3D FFT
+    if FFTmod == 'NUMPY':
+        fourier3d_noshift = np.fft.fftn(array) # Numpy implementation
+    if FFTmod == 'FFTW':
+        fourier3d_noshift = pyfftw.interfaces.numpy_fft.fft2(array) # FFTW implementation
+        # Turn on the cache for optimum performance
+        pyfftw.interfaces.cache.enable()
+        
+    # shift 3D spectrum
+    fourier3d = np.fft.fftshift(fourier3d_noshift)
+    
+    # compute 3D power spectrum
+    psd3d = np.abs(fourier3d)**2/(array.shape[0]*array.shape[1]*array.shape[2])  
+    
+    # compute frequencies
+    freqNoShift_ax0 = fftpack.fftfreq(array.shape[0], d=float(resolutions[0]))
+    freqNoShift_ax1 = fftpack.fftfreq(array.shape[1], d=float(resolutions[1]))
+    freqNoShift_ax2 = fftpack.fftfreq(array.shape[2], d=float(resolutions[2]))
+    freq_ax0 = np.fft.fftshift(freqNoShift_ax0)
+    freq_ax1 = np.fft.fftshift(freqNoShift_ax1)
+    freq_ax2 = np.fft.fftshift(freqNoShift_ax2)
+    
+    return psd3d, [freq_ax0, freq_ax1, freq_ax2]
+    
+    
 def compute_2d_spectrum(rainfallImage, resolution=1, window=None, FFTmod='NUMPY'):
     '''
     Function to compute the 2D FFT power spectrum.
@@ -173,7 +221,7 @@ def compute_2d_spectrum(rainfallImage, resolution=1, window=None, FFTmod='NUMPY'
     if FFTmod == 'NUMPY':
         fprecipNoShift = np.fft.fft2(rainfallImage*w) # Numpy implementation
     if FFTmod == 'FFTW':
-        fprecipNoShift = pyfftw.interfaces.numpy_fft.fft2(rainfallImage*window) # FFTW implementation
+        fprecipNoShift = pyfftw.interfaces.numpy_fft.fft2(rainfallImage*w) # FFTW implementation
         # Turn on the cache for optimum performance
         pyfftw.interfaces.cache.enable()
     
@@ -209,7 +257,7 @@ def compute_dft_1d_spectrum(rainfallImage, resolution=1, window='flat-hanning'):
     psd2d,_ = compute_2d_spectrum(rainfallImage,resolution, window)
 
     # Radial average
-    psd1d, freq, wavelength = compute_radialAverage_spectrum(psd2d, resolution=1)
+    psd1d, freq, wavelength = compute_radialAverage_spectrum(psd2d, resolution)
 
     return psd1d, freq, wavelength    
     
