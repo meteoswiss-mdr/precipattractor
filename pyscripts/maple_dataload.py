@@ -508,9 +508,8 @@ def generate_geo(fileNameGeo='/scratch/lforesti/maple_data/python-database/geo.p
         #################### GET DEM ##################################################
         print('Preparing DEM and shapefile...')
         # Read SRTM DEM
-        fileNameDEM_SRTM = '/users/lforesti/scripts/dem_proc/dem_merged_projected_clip1000CCS4.tif'
-        # fileNameDEM_SRTM = '/users/' + usrName + '/scripts/dem_proc/ritaf_rimini_250m_extendend.tif'
-        x_dem,y_dem, geo.demImg,  = gis.gdal_read_raster(fileNameDEM_SRTM)
+        geo.fileNameDEM_SRTM = '/store/mch/msrad/radar/precip_attractor/gis_data/dem_proc/dem_merged_projected_clip1000CCS4.tif'
+        x_dem,y_dem, geo.demImg,  = gis.gdal_read_raster(geo.fileNameDEM_SRTM)
         x_dem_min = min(x_dem)
         y_dem_min = min(y_dem)
         x_dem_max = max(x_dem)
@@ -534,9 +533,7 @@ def generate_geo(fileNameGeo='/scratch/lforesti/maple_data/python-database/geo.p
 
         #################### GET SHAPEFILE ##################################################
         # Shapefile name and projections
-        dirShp = '/users/' + usrName + '/scripts/shapefiles'
-        fileNameShapefile = dirShp + '/CHE_adm/CHE_adm0.shp'
-        geo.fileNameShapefile = '/users/lforesti/scripts/shapefiles_proc/CCS4_merged_proj_clip_G05_countries/CCS4_merged_proj_clip_G05_countries.shp' 
+        geo.fileNameShapefile = '/store/mch/msrad/radar/precip_attractor/gis_data/shapefiles_proc/CCS4_merged_proj_clip_G05_countries/CCS4_merged_proj_clip_G05_countries.shp' 
 
         geo.proj4stringWGS84 = "+proj=longlat +ellps=WGS84 +datum=WGS84"
         geo.proj4stringCH = "+proj=somerc +lat_0=46.95240555555556 +lon_0=7.439583333333333 \
