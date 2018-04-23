@@ -40,19 +40,21 @@ fmt3 = "%.3f"
 
 #########################################################################
 ############# PARAMETERS FOR SYNTHETIC CASES ############################
+X_predictors = ['x_d', 'y_d', 'u', 'v', 'hzt_o'] #, 'daytime_sin', 'daytime_cos']
 
 ## Parameters for synthetic cases
 sectorSizeDeg = 5
 
-#flowDirection_degN_array = np.arange(0,360, sectorSizeDeg)
-flowDirection_degN_array = [270+45]
-
-#hztHeight_m_array = np.arange(500,4600,100)
-hztHeight_m_array = [3000]
+flowDirection_degN_array = np.arange(0,360, sectorSizeDeg)
+#flowDirection_degN_array = [180+45]
 
 flowSpeed_kmh_array = [30]
 
+hztHeight_m_array = np.arange(500,4600,100)
+hztHeight_m_array = [3000]
+
 dayTime_array = np.arange(0,24)
+dayTime_array = [12]
 
 #########################################################################
 
@@ -92,9 +94,21 @@ if os.path.isfile(args.model):
     best_model = joblib.load(args.model)
     print(args.model, 'read.')
     print(best_model)
+    
+    if hasattr(best_model, 'variables'):
+        X_predictors = best_model.variables        
 else:
     print('File', args.model, 'not found.')
     sys.exit()
+        
+############### SELECT PREDICTORS ######################################################################
+# List of all variable names
+X_varnames = ['x_d', 'y_d', 'u', 'v', 'hzt_o', 'daytime_sin', 'daytime_cos']
+X_varnames_dict = dict(zip(X_varnames, np.arange(0,len(X_varnames))))
+
+print('Predictors chosen:')
+print(X_predictors)
+X_ids = [X_varnames_dict[k] for k in X_predictors]
 
 ##### Load file to scale the data
 fileName_scaler = tmpDir + 'scaler.pkl'
@@ -154,7 +168,9 @@ for flowDirection_degN, flowDirection_compassShort, flowDirection_compassLong  i
                 # Flatten
                 X_pred = np.column_stack((x_grid.flatten(), y_grid.flatten(), u_grid.flatten(), v_grid.flatten(), hzt_grid.flatten(), dayTimeSin_grid.flatten(), dayTimeCos_grid.flatten()))
                 X_pred_scaled = scaler.transform(X_pred)
-                
+                    
+                # Select predictors
+                X_pred_scaled = X_pred_scaled[:, X_ids]
                 #################
                 # Predict growth and decay on grid
                 y_pred = best_model.predict(X_pred_scaled)
@@ -233,8 +249,24 @@ for flowDirection_degN, flowDirection_compassShort, flowDirection_compassLong  i
                 # plt.text(x_txt, y_txt-3*line_s, 'Freezing elvel height = ' + str(hztHeight_m) + ' m', transform=ax.transAxes, fontsize=ftsize_txt, horizontalalignment=alignment)
                 plt.text(1.0, y_txt-1*line_s, "%02i" % dayTime + ' UTC', transform=ax.transAxes, fontsize=ftsize_txt, horizontalalignment='right')
                 
-                fileNameFig = outBaseDir + best_model.name + '/' + best_model.name + '_predictions_flow_' + str(flowDirection_degN).zfill(3) \
-                + flowDirection_compassShort + '_speed' +  str(flowSpeed_kmh) + 'kmh_hzt' + str(hztHeight_m).zfill(4) + 'm_' + ("%02i" % dayTime) + 'UTC.' + fig_fmt
+                ### Filename
+                if ('u' in X_predictors) and ('v' in X_predictors):
+                    flowString = '_flow_' + str(flowDirection_degN).zfill(3) + flowDirection_compassShort + '_speed' +  str(flowSpeed_kmh) + 'kmh_hzt'
+                else:
+                    flowString = ''
+                    
+                if ('hzt_o' in X_predictors) or ('hzt_d' in X_predictors):
+                    hztString = '_' + str(hztHeight_m).zfill(4) + 'm_' 
+                else:
+                    hztString = ''
+                    
+                if ('daytime_sin' in X_predictors) and ('daytime_cos' in X_predictors):
+                    daytimeString = '_' + ("%02i" % dayTime) + 'UTC'
+                else:
+                    daytimeString = ''
+                
+                fileNameFig = outBaseDir + best_model.name + '/' + best_model.name + '_predictions'  + flowString + daytimeString + '.' + fig_fmt
+                
                 fig.savefig(fileNameFig, dpi=fig_dpi, bbox_inches='tight')
                 print(fileNameFig, 'saved.')
                 plt.close()
