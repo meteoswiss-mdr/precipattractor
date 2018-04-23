@@ -171,6 +171,7 @@ for flowDirection_degN, flowDirection_compassShort, flowDirection_compassLong  i
                     
                 # Select predictors
                 X_pred_scaled = X_pred_scaled[:, X_ids]
+                
                 #################
                 # Predict growth and decay on grid
                 y_pred = best_model.predict(X_pred_scaled)
@@ -256,7 +257,7 @@ for flowDirection_degN, flowDirection_compassShort, flowDirection_compassLong  i
                     flowString = ''
                     
                 if ('hzt_o' in X_predictors) or ('hzt_d' in X_predictors):
-                    hztString = '_' + str(hztHeight_m).zfill(4) + 'm_' 
+                    hztString = '_' + str(hztHeight_m).zfill(4) + 'm' 
                 else:
                     hztString = ''
                     
@@ -265,7 +266,7 @@ for flowDirection_degN, flowDirection_compassShort, flowDirection_compassLong  i
                 else:
                     daytimeString = ''
                 
-                fileNameFig = outBaseDir + best_model.name + '/' + best_model.name + '_predictions'  + flowString + daytimeString + '.' + fig_fmt
+                fileNameFig = outBaseDir + best_model.name + '/' + best_model.name + '_predictions'  + flowString  + hztString + daytimeString + '.' + fig_fmt
                 
                 fig.savefig(fileNameFig, dpi=fig_dpi, bbox_inches='tight')
                 print(fileNameFig, 'saved.')
