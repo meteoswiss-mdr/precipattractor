@@ -68,14 +68,13 @@ parser.add_argument('-end', default='201505152355', type=str,help='Ending date Y
 parser.add_argument('-product', default='AQC', type=str,help='Which radar rainfall product to use (AQC, CPC, etc).')
 parser.add_argument('-minR', default=0.08, type=float,help='Minimum rainfall rate for computation of WAR and various statistics.')
 parser.add_argument('-accum', default=5, type=int,help='Accumulation time of the product [minutes].')
-parser.add_argument('-temp', default=10, type=int,help='Temporal sampling of the products [minutes].')
+parser.add_argument('-temp', default=5, type=int,help='Temporal sampling of the products [minutes].')
 parser.add_argument('-dpi', default=150, type=int,help='Image resolution.')
 parser.add_argument('-delay', default=20, type=int,help='Display the next image after pausing.')
 parser.add_argument('-domainSizeLat', default=512, type=int,help='[km]')
 parser.add_argument('-domainSizeLon', default=512, type=int,help='[km]')
+parser.add_argument('-text', default='cmrl', type=str, help='What text to draw on map: c=cities, r=radars, m=mountains, l=countires (lands). cmrl -> all')
 parser.add_argument('-figsize', default=9, type=float,help='')
-
-
 args = parser.parse_args()
 
 product = args.product
@@ -153,10 +152,11 @@ allXcoords = np.arange(Xmin,Xmax+resKm*1000,resKm*1000)
 allYcoords = np.arange(Ymin,Ymax+resKm*1000,resKm*1000)
 
 # Set shapefile filename
-fileNameShapefile = dirDEM + '/CHE_adm0.shp'
+fileNameShapefile = '/users/lforesti/scripts/shapefiles_proc/CCS4_merged_proj_clip_G05_countries/CCS4_merged_proj_clip_G05_countries.shp' 
 proj4stringWGS84 = "+proj=longlat +ellps=WGS84 +datum=WGS84"
 proj4stringCH = "+proj=somerc +lat_0=46.95240555555556 +lon_0=7.439583333333333 \
 +k_0=1 +x_0=600000 +y_0=200000 +ellps=bessel +towgs84=674.374,15.056,405.346,0,0,0,0 +units=m +no_defs" 
+
 
 #proj4stringCH = "+proj=somerc +lat_0=46.95240555555556 +lon_0=7.439583333333333 \
 #+k_0=1 +x_0=2600000 +y_0=1200000 +ellps=bessel +towgs84=674.374,15.056,405.346,0,0,0,0 +units=m +no_defs"
@@ -277,9 +277,19 @@ while timeLocal <= timeEnd:
             rainIm = rainAx.imshow(rainratePlot, extent = (Xmin, Xmax, Ymin, Ymax), cmap=cmap, norm=norm, interpolation='nearest')
             
             # Draw shapefile
-            gis.read_plot_shapefile(fileNameShapefile, proj4stringWGS84, proj4stringCH,  ax = rainAx, linewidth = 0.75)
+            gis.read_plot_shapefile(fileNameShapefile, proj4stringCH, proj4stringCH,  ax = rainAx, linewidth = 0.75)
             
-                        # Colorbar
+            # Draw cities, radars, regions
+            if 'r' in args.text:
+                dt.draw_radars(rainAx, which=['LEM','DOL','ALB','PPM', 'WEI'], fontsize=10, marker='^', markersize=50, markercolor='w', only_location=True)
+            if 'c' in args.text:
+                dt.draw_cities(rainAx, fontsize=10, marker='o', markersize=8, markercolor='k')    
+            if 'm' in args.text:
+                dt.draw_regions(rainAx, fontsize=11, color='r')
+            if 'l' in args.text:
+                dt.draw_countries(rainAx, fontsize=11, color='k')
+            
+            # Colorbar
             cbar = plt.colorbar(rainIm, ticks=clevs, spacing='uniform', norm=norm, extend='max', fraction=0.03)
             cbar.set_ticklabels(clevsStr, update_ticks=True)
             if (timeAccumMin == 1440):
