@@ -20,11 +20,14 @@ import pandas as pd
 
 from osgeo import gdal, osr, ogr
 import geo
-
+from scipy import ndimage
+from scipy.interpolate import griddata, Rbf, LinearNDInterpolator
 
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
+
+import stat_tools_attractor as st
 
 def linear_rescaling(value, oldmin, oldmax, newmin, newmax):
     newvalue= (newmax-newmin)/(oldmax-oldmin)*(value-oldmax)+newmax
@@ -39,7 +42,6 @@ def to_dB(array, offset=-1):
     if isList == True:
         array = np.array(array)
     if offset != -1:
-        print('ciaoooo')
         dBarray = 10.0*np.log10(array + offset)
     else:
         dBarray = 10.0*np.log10(array)
@@ -1027,3 +1029,131 @@ def set_yaxis_color(ax, color):
     ax.yaxis.label.set_color(color)
     [t.set_color(color) for t in ax.yaxis.get_ticklines()]
     [t.set_color(color) for t in ax.yaxis.get_ticklabels()]
+
+def interp_FFTfilter_HZT(fieldHZT, missingData_metranet=6362.5, missingData_netcdf=-999, minPercMissing=30, cutoff_scale_km=50, resolution_km=1):
+    
+    # Interpolate missing HZT values
+    maxPercMissing=30
+    field_raw_interp, percMissing, boolMissing = interp_missing_HZT(fieldHZT, missingData_metranet, missingData_netcdf, maxPercMissing=maxPercMissing)
+    
+    # Apply Fourier filter
+    if percMissing < maxPercMissing:
+        print('Applying Fourier low pass filter...')
+        field_fft = st.fourier_low_pass2d(field_raw_interp, cutoff_scale_km, resolution_km=1)
+    else:
+        print('Not enough data for Fourier filter.')
+        field_fft = field_raw_interp
+        
+    return(field_fft, field_raw_interp, percMissing, maxPercMissing, boolMissing)
+    
+def interp_missing_HZT(fieldHZT, missingData_metranet=6362.5, missingData_netcdf=-999, maxPercMissing=30):
+    '''
+    Function to re-interpolate the missing HZT values
+    '''
+    #### PARAMETERS ####
+    maxHZT = 5500
+    
+    print('++++++++++++')
+    ####################
+    # Limits of CCS4 domain (from extent)
+    Xmin = 255000
+    Xmax = 965000
+    Ymin = -160000
+    Ymax = 480000
+    extent_CCS4 = [Xmin, Xmax, Ymin, Ymax]
+        
+    # Compute coordinates of CCS4 domain
+    resKM = 1
+    xcoords_ccs4 = np.arange(extent_CCS4[0]/1000, extent_CCS4[1]/1000, resKM)
+    ycoords_ccs4 = np.flipud(np.arange(extent_CCS4[2]/1000, extent_CCS4[3]/1000, resKM))
+
+    xcoords_ccs4_grid, ycoords_ccs4_grid = np.meshgrid(xcoords_ccs4, ycoords_ccs4)
+    xcoords_ccs4_grid_flat = xcoords_ccs4_grid.flatten()
+    ycoords_ccs4_grid_flat = ycoords_ccs4_grid.flatten()
+
+    coordinates_unique_ccs4 = np.column_stack((xcoords_ccs4_grid_flat, ycoords_ccs4_grid_flat))
+    
+    ####################
+    field_raw = np.array(fieldHZT)
+    field_raw_flat = field_raw.flatten()
+    
+    # Check for missing or bad data
+    boolMissing = (field_raw == missingData_netcdf) | (field_raw == missingData_metranet) | (field_raw > maxHZT) | (field_raw == 0.0) | (field_raw == np.nan)
+    boolMissing_flat = boolMissing.flatten()
+    nrMissing = np.sum(boolMissing)
+    percMissing = 100*nrMissing/(field_raw.shape[0]*field_raw.shape[1])
+    print(nrMissing, 'missing or bad pixels found.', int(percMissing), '%')
+    
+    # What to do when too many missing data
+    valueMissing = 'nan' # 'nan' or 'field_mean'
+    if (percMissing > 0) & (percMissing < maxPercMissing):
+        
+        #### DILATE REGIONS
+        # Dilate the region of missing data to account for close aberrant values
+        print('Dilating region of missing data...')
+        struct = ndimage.generate_binary_structure(2,2)
+        boolMissing_dilated = ndimage.binary_dilation(boolMissing, structure=struct)
+        boolMissing_dilated_flat = boolMissing_dilated.flatten()
+        
+        # Dilate more to define buffer of pixels for interpolation (faster for griddata)
+        struct = ndimage.generate_binary_structure(2,2)
+        boolMissing_dilated_more = ndimage.binary_dilation(boolMissing_dilated, structure=struct)
+        boolMissing_dilated_more = ndimage.binary_dilation(boolMissing_dilated_more, structure=struct)
+        boolMissing_dilated_more = ndimage.binary_dilation(boolMissing_dilated_more, structure=struct)
+        boolMissing_dilated_flat_more = boolMissing_dilated_more.flatten()
+        
+        boolValid_buffer = (boolMissing_dilated == False) & (boolMissing_dilated_more == True)
+        boolValid_buffer_flat = boolValid_buffer.flatten()
+        
+        ##### INTERPOLATE MISSING DATA
+        interp_function = 'griddata' #'regular_grid'
+        print('Interpolating missing data...')
+        coords_valid = coordinates_unique_ccs4[boolValid_buffer_flat]
+        values = field_raw_flat[boolValid_buffer_flat]
+        coords_missing = coordinates_unique_ccs4[boolMissing_dilated_flat]
+        
+        if interp_function == 'griddata':
+            # Interpolate missing data
+            interpType = 'linear' #'linear' ('cubic' may lead to unrealistically high values)
+            interpolated_missing = griddata(coords_valid, values, (coords_missing), method=interpType)
+            # Replace missing values with interpolated ones
+            field_raw_flat[boolMissing_dilated_flat] = interpolated_missing
+        elif interp_function == 'regular_grid':
+            # Interpolate missing data
+            my_interp_func = LinearNDInterpolator((coords_valid), values, fill_value=np.nan, rescale=False)
+            interpolated_missing = my_interp_func((coords_missing[:,0], coords_missing[:,1]))
+            # Replace missing values with interpolated ones
+            field_raw_flat[boolMissing_dilated_flat] = interpolated_missing
+        else:
+            print('Invalid interpolation function.')
+            sys.exit()
+        
+        # Interpolate remaining NaNs (scipy bug with linear interpolation)
+        isnan_data = np.isnan(field_raw_flat)
+        print(np.sum(isnan_data), 'nans left.')
+        if np.sum(isnan_data) > 0:
+            print('Interpolate remaining nans...')
+            coords_valid = coordinates_unique_ccs4[~isnan_data]
+            values = field_raw_flat[~isnan_data]
+            coords_missing = coordinates_unique_ccs4[isnan_data]
+            interpolated_nans = griddata(coords_valid, values, (coords_missing), method='nearest')
+            field_raw_flat[isnan_data] = interpolated_nans
+        
+        field_raw_interp = field_raw_flat.reshape(field_raw.shape)
+    elif (percMissing >= maxPercMissing):
+        # Not enough HZT data... take mean HZT over the whole field or set NaN everywhere
+        print('Not enough data for interpolation.')
+        if valueMissing == 'field_mean':
+            meanHZT = np.nanmean(field_raw)
+        elif valueMissing == 'nan':
+            meanHZT = missingData_netcdf # np.nan
+        else:
+            print('valueMissing should be either nan or field_mean')
+            sys.exit(1)
+        field_raw_interp = meanHZT*np.ones((field_raw.shape))
+    else:
+        print('No missing data found.')
+        field_raw_interp = field_raw
+        
+    return(field_raw_interp, percMissing, boolMissing)
+    

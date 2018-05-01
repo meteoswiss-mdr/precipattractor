@@ -38,7 +38,9 @@ import scipy.spatial.distance as dist
 import radialprofile
 import time_tools_attractor as ti
 
+fmt1 = "%.1f"
 fmt2 = "%.2f"
+fmt3 = "%.3f"
 
 def compute_imf(rainfield, rainThreshold=-1, noData=-999.0):
     idxRain = (rainfield > rainThreshold) & (rainfield != noData)
@@ -1374,7 +1376,6 @@ scores_list=['ME_add','RMSE_add','RV_add','corr_s','corr_p','beta','ME_mult','RM
         RMSE_add = np.sqrt(1.0/N*sum((add_res)**2))
         scores.append(RMSE_add)
         scores_list_sorted.append('RMSE_add')
-        print(RMSE_add, N)
     
     if 'RMSE_mult' in scores_list:
         RMSE_mult = np.sqrt(1.0/N*sum((mult_res)**2))
@@ -1488,8 +1489,10 @@ def add_regression_line_scores(x_array, y_array, ax):
     
     ################################
     # Compute statistics and errors
-    scores_list = ['corr_s', 'RMSE_add'] #, 'RV_add']
+    scores_list = ['corr_p', 'RMSE_add'] #, 'RV_add']
     scores, scores_list = scores_det_cont_fcst(x_array, y_array, scores_list)
+    
+    print(scores_list, [fmt3 % scores[0], fmt3 % scores[1]])
     
     text_legend = ''
     scores_names = scores_list_names(scores_list)
