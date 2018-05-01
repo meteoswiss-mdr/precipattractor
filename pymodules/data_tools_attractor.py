@@ -81,7 +81,7 @@ def rainrate2reflectivity(rainrate, A=316.0, b=1.5, zerosDBZ='auto'):
         minRainRate = 0.012 # 0.0115537519713
     minDBZ = 10.0*np.log10(A*minRainRate**b)
     
-    if type(rainrate) == np.ndarray and len(rainrate) > 1:
+    if type(rainrate) == np.ndarray and not np.isscalar(rainrate):
         # Compute reflectivity
         dBZ = rainrate.copy()
         dBZ[rainIdx] = 10.0*np.log10(A*rainrate[rainIdx]**b)

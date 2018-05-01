@@ -126,7 +126,7 @@ def read_gif_image_rainrate(timeStr, inBaseDir='/scratch/lforesti/data/', produc
 
 def read_bin_image(timeStr, product='RZC', minR = 0.08, fftDomainSize = 512, resKm = 1,\
     inBaseDir = '/scratch/lforesti/data/', noData = -999.0, cmaptype = 'MeteoSwiss', domain = 'CCS4'):
-    
+
     # Limits of spatial domain
     if domain == 'CCS4':
         Xmin = 255000
@@ -150,9 +150,10 @@ def read_bin_image(timeStr, product='RZC', minR = 0.08, fftDomainSize = 512, res
     # Get filename
     fileName, yearStr, julianDayStr, hourminStr = get_filename_radar(timeStr, inBaseDir, product)
     timeLocal = ti.timestring2datetime(timeStr)
-    
+ 
     # Check if file exists
     isFile = os.path.isfile(fileName)
+   
     if (isFile == False):
         print('File: ', fileName, ' not found.')
         radar_object = Radar_object()  
@@ -306,12 +307,13 @@ def read_gif_image(timeStr, product='AQC', minR = 0.08, fftDomainSize = 512, res
     timeLocal = ti.timestring2datetime(timeStr)
     
     # Get data quality from fileName
-    dataQuality = get_quality_fromfilename(fileName)
+    # dataQuality = get_quality_fromfilename(fileName)
     
     # Check if file exists
     isFile = os.path.isfile(fileName)
     if (isFile == False):
         print('File: ', fileName, ' not found.')
+        print(timeStr,inBaseDir,product,timeAccumMin)
         radar_object = Radar_object()  
     else:
         # Reading GIF file
@@ -324,8 +326,8 @@ def read_gif_image(timeStr, product='AQC', minR = 0.08, fftDomainSize = 512, res
             alb, dol, lem, ppm, wei = get_gif_radar_operation(fileName)
             
             # If metadata are not written in gif file derive them from the quality number in the filename
-            if (alb == -1) & (dol == -1) & (lem == -1) & (ppm == -1) & (wei == -1):
-                alb, dol, lem = get_radaroperation_from_quality(dataQuality)
+            # if (alb == -1) & (dol == -1) & (lem == -1) & (ppm == -1) & (wei == -1):
+                # alb, dol, lem = get_radaroperation_from_quality(dataQuality)
 
             # Generate lookup table
             lut = dt.get_rainfall_lookuptable(noData)
@@ -433,7 +435,7 @@ def read_gif_image(timeStr, product='AQC', minR = 0.08, fftDomainSize = 512, res
             radar_object.lem = lem
             radar_object.ppm = ppm
             radar_object.wei = wei
-            radar_object.dataQuality = dataQuality
+            radar_object.dataQuality = np.nan
             
             # Location
             radar_object.extent = (Xmin, Xmax, Ymin, Ymax)
