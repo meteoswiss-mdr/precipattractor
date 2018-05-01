@@ -262,9 +262,11 @@ def ux(fieldin, upscale_km, resKm = 1, wavelet = 'haar'):
 
 #+++++++++++++++++++++++++++++++++++ Init the nowcast 
 
-f = Nowcasting(data, N, hx=[], fx, rx, phi, AR_order=AR_order, number_levels=number_levels, transformation=transformation, probability_matching=probability_matching, resolution_km=upscale_km, label='with growthdecay', min_rainrate=min_rainrate, zero_padding=zero_padding)
+hx = []
 
-g = Nowcasting(data, N, hx=[], fx, rx, phi, AR_order=AR_order, number_levels=number_levels, transformation=transformation, probability_matching=probability_matching, resolution_km=upscale_km, label='without growthdecay', min_rainrate=min_rainrate, zero_padding=zero_padding)
+f = Nowcasting(data, N, hx, fx, rx, phi, AR_order=AR_order, number_levels=number_levels, transformation=transformation, probability_matching=probability_matching, resolution_km=upscale_km, label='with growthdecay', min_rainrate=min_rainrate, zero_padding=zero_padding)
+
+g = Nowcasting(data, N, hx, fx, rx, phi, AR_order=AR_order, number_levels=number_levels, transformation=transformation, probability_matching=probability_matching, resolution_km=upscale_km, label='without growthdecay', min_rainrate=min_rainrate, zero_padding=zero_padding)
 
 #+++++++++++++++++++++++++++++++++++ Start nowcasting
 
