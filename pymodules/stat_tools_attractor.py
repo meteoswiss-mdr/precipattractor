@@ -1573,9 +1573,7 @@ def add_regression_line_scores(x_array, y_array, ax):
     # Compute statistics and errors
     scores_list = ['corr_p', 'RMSE_add'] #, 'RV_add']
     scores, scores_list = scores_det_cont_fcst(x_array, y_array, scores_list)
-    
-    print(scores_list, [fmt3 % scores[0], fmt3 % scores[1]])
-    
+        
     text_legend = ''
     scores_names = scores_list_names(scores_list)
     for i in range(len(scores_names)):
@@ -1601,64 +1599,3 @@ def scores_list_names(scores_list_in):
                 scores_names_out.append(scores_names[j])
         
     return(scores_names_out)
-
-def predict_quantile(model, X, percentile=50):
-    '''
-    Predict given quantile based on random forest.
-    '''
-    ## LOOP over the prediction of each tree for that sample
-    preds = []
-    for pred in model.estimators_:
-        preds.append(pred.predict(X))
-    preds = np.array(preds).T
-    preds_quantile = np.percentile(preds, percentile, axis=1)
-    
-    return(preds_quantile)
-
-def prediction_intervals(model, X, percentile=95):
-    '''
-    Function to compute the prediction interval from random forests.
-    '''
-    err_down = []
-    err_up = []
-    ## LOOP over each sample
-    for i in range(len(X)):
-        preds = []
-        ## LOOP over the prediction of each tree for that sample
-        for pred in model.estimators_:
-            preds.append(pred.predict(X[i,:].reshape(1, -1)))
-        
-        err_down.append(np.percentile(preds, 50 - percentile/2.0 ))
-        err_up.append(np.percentile(preds, 50 + percentile/2.0))
-    return err_down, err_up
-
-def prediction_intervals_fast(model, X, percentile=95):
-    '''
-    Function to compute the prediction interval from random forests.
-    No need to loop over number of samples.
-    '''
-    err_down = []
-    err_up = []
-    preds = []
-    ## LOOP over the prediction of each tree for that sample
-    for pred in model.estimators_:
-        preds.append(pred.predict(X))
-    
-    preds = np.array(preds).T
-    err_down = np.percentile(preds, 50 - percentile/2.0, axis=1)
-    err_up = np.percentile(preds, 50 + percentile/2.0, axis=1)
-    return err_down, err_up
-    
-def pred_interval_evaluation(y_obs, err_down, err_up=None):
-    '''
-    Function to evaluate the prediction intervals (quantiles).
-    If both err_down and err_up ar passed it counts how many observations fall within that interval.
-    If only err_down is passed it counts how many observations fall below that value.
-    '''
-    if (err_up == None):
-        correct = (y_obs <= err_down)
-    else:
-        correct = (err_down <= y_obs) & (y_obs <= err_up)
-    correctPerc = np.nansum(correct)/len(correct)*100
-    return correctPerc
-    

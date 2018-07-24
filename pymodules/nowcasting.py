@@ -1042,8 +1042,8 @@ def autoregressive_parameters(cascadeStack, cascadeMeanStack, cascadeStdStack, o
     
     # correct correlation coefficients
     if NumberLevels>1:
-        # cf = 1/(1.01 - 0.0005*np.arange(NumberLevels)**3.5)
-        cf = 1
+        cf = 1/(1.01 - 0.0004*np.arange(NumberLevels)**3)
+        # cf = 1
         for n in xrange(NumberLags):
             r[:,n] *= cf
         # r[0,:] *= 0.99    

@@ -126,7 +126,7 @@ def read_gif_image_rainrate(timeStr, inBaseDir='/scratch/lforesti/data/', produc
 
 def read_bin_image(timeStr, product='RZC', minR = 0.08, fftDomainSize = 512, resKm = 1,\
     inBaseDir = '/scratch/lforesti/data/', noData = -999.0, cmaptype = 'MeteoSwiss', domain = 'CCS4'):
-
+    
     # Limits of spatial domain
     if domain == 'CCS4':
         Xmin = 255000
@@ -280,7 +280,7 @@ def read_bin_image(timeStr, product='RZC', minR = 0.08, fftDomainSize = 512, res
     return radar_object
     
 def read_gif_image(timeStr, product='AQC', minR = 0.08, fftDomainSize = 512, resKm = 1, timeAccumMin = 5,\
-    inBaseDir = '/scratch/ned/data/', noData = -999.0, cmaptype = 'MeteoSwiss', domain = 'CCS4'):
+    inBaseDir = '/scratch/lforesti/data/', noData = -999.0, cmaptype = 'MeteoSwiss', domain = 'CCS4'):
     
     # Limits of spatial domain
     if domain == 'CCS4':

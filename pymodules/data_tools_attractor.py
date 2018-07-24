@@ -165,13 +165,15 @@ def get_reduced_extent(width, height, domainSizeX, domainSizeY):
     if ((width - domainSizeX) % 2) == 0:
         borderSizeX = (width - domainSizeX)/2
     else:
-        print('Problem in get_reduced_extent. Non-even border size in X dimension.')
-        sys.exit(1)
+        print('Problem in data_tools_attractor::get_reduced_extent. Non-even border size in X dimension.')
+        print('Dims [w,h,dsizex,dsizey]:', width, height, domainSizeX, domainSizeY)
+        # sys.exit(1)
     if ((height - domainSizeY) % 2) == 0:
         borderSizeY = (height - domainSizeY)/2
     else:
-        print('Problem in get_reduced_extent. Non-even border size in Y dimension.')
-        sys.exit(1)
+        print('Problem in data_tools_attractor::get_reduced_extent. Non-even border size in Y dimension.')
+        print('Dims [w,h,dsizex,dsizey]:', width, height, domainSizeX, domainSizeY)
+        # sys.exit(1)
         
     # extent
     extent = (int(borderSizeX), int(borderSizeY), int(width-borderSizeX), int(height-borderSizeY)) # left, upper, right, lower

@@ -15,6 +15,7 @@ import cv2
 import argparse
 
 from scipy import fftpack
+import datetime as datetime
 
 import nowcasting as nw
 import io_tools_attractor as io
@@ -22,7 +23,6 @@ import data_tools_attractor as dt
 import stat_tools_attractor as st
 import time_tools_attractor as ti
 import ssft
-
 
 # advection schemes
 import maple_ree
@@ -33,9 +33,21 @@ from plotting_functions import plot_frames_paper
 from sklearn.externals import joblib # same purpose as pickle but more efficient with big data / can only pickle to disk
 from sklearn import preprocessing
 
+fmt1 = "%.1f"
+fmt2 = "%.2f"
+fmt3 = "%.3f"
+
 # Parameters
 np.random.seed(1)
 
+'''
+31/08/2017 18:40. Qui dovrebbe essere utile anche il generatore locale
+08/01/2018 22:00. Divertiti
+04/01/2018 08:00. Simile a quello che abbiamo gia ma con precipitazioni portate da nord sul sopraceneri.
+27/12/2017 10:00
+11/12/2017 17:00
+05/11/2017 06:00
+'''
 #+++++++++++++++++++++++++++++++++++ Get arguments from command line
 
 parser = argparse.ArgumentParser(description='Test nowcasting.')
@@ -54,28 +66,38 @@ start = ti.timestring2datetime(startStr)
 leadtime_hrs = 4
 timestep_res_min = 10
 domain_size = 512
-upscale_km = 1                 
-N = 21
+upscale_km = 2              
+N = 5
 AR_order = 2                  
 number_levels = 8
 min_rainrate = 0.08
 cosmo_model = 'COSMO-E'
-transformation = 'dBR'          # 'dBR', 'dBZ', False
+transformation = 'dBR'          # 'dBR', 'dBZ', False2017
 probability_matching = True     # probability matching
 advection_scheme = 'maple'      # 'maple','euler'
-zero_padding = 32
+gd_inflation_factor = 3
 
+# -----------------------
+if upscale_km==1:
+    zero_padding = 32
+if upscale_km==2:
+    zero_padding = 64
+else:
+    zero_padding = 0
+    
 maxleadtime_min = leadtime_hrs*60
 nts = int(maxleadtime_min/timestep_res_min)
-    
 
 #+++++++++++++++++++++++++++++++++++ Load the data
-
-data = Datamanager(startStr,endStr,upscale_km,min_rainrate=min_rainrate)
-
-r0 = io.read_bin_image('201604161900',inBaseDir='/scratch/ned/data/', minR=min_rainrate, fftDomainSize=domain_size) # for plotting parameters only
+ti.tic()
+data = Datamanager(startStr, endStr, upscale_km, min_rainrate=min_rainrate)
+r0 = io.read_bin_image('201604161900', inBaseDir='/scratch/ned/data/', minR=min_rainrate, fftDomainSize=domain_size) # for plotting parameters only
+ti.toc("to load the composite radar images.")
 
 #+++++++++++++++++++++++++++++++++++ Compute motion field
+print('+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++')
+print('Computing radar echo motion field...')
+ti.tic()
 radar_nlast = data.n_last_obs(3)
 radarStack=[]
 minDBZ = 10.0*np.log10(316*min_rainrate**1.5)
@@ -94,8 +116,18 @@ for i in xrange(3):
     radarStack.append(arrayin)
 nrOfFields = len(radarStack)
 U,V = nw.get_motion_field(radarStack, doplot=0, verbose=1, resKm = upscale_km, resMin = timestep_res_min)
+ti.toc('to compute the motion field')
 
 #+++++++++++++++++++++++++++++++++++ Predict growth&decay
+print('+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++')
+print('Predicting growth and decay with machine learning...')
+ti.tic()
+
+import metranet
+import maple_dataload
+geo = maple_dataload.generate_geo()
+cmaps = maple_dataload.generate_colormaps()
+import gis_base as gis
 
 model = '/scratch/lforesti/ml_tmp/mlp_predictors/mlp_model_7-100-1_xyuv-hzt-utc.pkl'
 tmpDir = '/scratch/lforesti/ml_tmp/'
@@ -127,12 +159,17 @@ print(fileName_scaler, 'read.')
 
 # Generate grid of spatial coordinates (extent of predictions)
 res_km = upscale_km
-x_min = 310
-x_max = 910
-y_min = -100
-y_max = 440
+# x_min = 310
+# x_max = 910
+# y_min = -100
+# y_max = 440
+# extent_image = np.array([x_min-res_km/2, x_max+res_km/2, y_min-res_km/2, y_max+res_km/2])*1000
 
-extent_image = np.array([x_min-res_km/2, x_max+res_km/2, y_min-res_km/2, y_max+res_km/2])*1000
+x_min = 255
+x_max = 965
+y_min = -160
+y_max = 480
+extent_image = np.array([x_min, x_max, y_min, y_max])*1000
 print(extent_image)
 
 # x, y
@@ -151,16 +188,64 @@ v_grid = -V*60/timestep_res_min*upscale_km
 hztHeight_m = 1000
 hzt_grid = hztHeight_m*np.ones(x_grid.shape)
 
+# Dir HZT fields from metranet file
+dataDirHZT_metranet = '/scratch/lforesti/data/'
+extent_image_hzt = np.array([x_min-0.5, x_max+0.5, y_min-0.5, y_max+0.5])*1000
+
+# Load HZT grids
+hzt_grid_proc_stack = []
+print('------------------------------')
+print('Loading HZT grids...')
+for lt in xrange(leadtime_hrs+1):
+    validTime = start - datetime.timedelta(minutes = start.minute) + datetime.timedelta(hours = 1)*lt 
+    
+    # Load HZT field
+    fileNameHZT, dirNameHZT = io.get_filename_HZT(dataDirHZT_metranet, validTime)
+    
+    if os.path.isfile(fileNameHZT):
+        hzt = metranet.read_file(fileNameHZT, physic_value=True, verbose=False)
+        print(fileNameHZT, 'read.')
+        hzt_grid_raw = hzt.data
+
+        # Pre-process HZT field
+        hzt_grid_proc, field_raw_interp, percMissing, maxPercMissing, boolMissing = dt.interp_FFTfilter_HZT(hzt_grid_raw, cutoff_scale_km=50, resolution_km=1)
+        # Extract same squared region
+        hzt_grid_proc = dt.extract_middle_domain(hzt_grid_proc, int(domain_size/res_km), int(domain_size/res_km))
+        # hzt_grid_proc = dt.extract_middle_domain(hzt_grid_raw, int(domain_size/res_km), int(domain_size/res_km))
+        
+    else:
+        print(fileNameHZT, 'not found.')
+        print('Using default HZT value =', hztHeight_m/1000,'km.') 
+        hzt_grid_proc = hzt_grid
+        
+    hzt_grid_proc_stack.append(hzt_grid_proc)
+print('All HZT grids loaded.')
+print('------------------------------')
+hzt_grid_proc_stack = np.array(hzt_grid_proc_stack)
+
 # Daytime
 y_pred_grid_disaggr = np.zeros((x_grid.shape[0],x_grid.shape[1],int(leadtime_hrs*60/timestep_res_min)))
+x_pred_grid_hzt = np.zeros((x_grid.shape[0],x_grid.shape[1],int(leadtime_hrs*60/timestep_res_min)))
+
 for lt in xrange(leadtime_hrs):
-    dayTime = start.hour + lt
+    validTime = start + datetime.timedelta(hours = 1)*lt 
+    
+    # Get HZT field for that time
+    minutes = validTime.minute
+    if minutes != 0:
+        # Perform a weighted combination of the HZT fields if you are in between two hours
+        hzt_grid_proc = hzt_grid_proc_stack[lt]*minutes/60 + hzt_grid_proc_stack[lt+1]*(60-minutes)/60
+    else:
+        hzt_grid_proc = hzt_grid_proc_stack[lt]
+    
+    # Generate dayTime variable
+    dayTime = start.hour + start.minute/60 + lt
     dayTimeSin, dayTimeCos = ti.daytime2circular(dayTime)
     dayTimeSin_grid = dayTimeSin*np.ones(x_grid.shape)
     dayTimeCos_grid = dayTimeCos*np.ones(x_grid.shape)
 
     # Flatten predictors
-    X_pred = np.column_stack((x_grid.flatten(), y_grid.flatten(), u_grid.flatten(), v_grid.flatten(), hzt_grid.flatten(), dayTimeSin_grid.flatten(), dayTimeCos_grid.flatten()))
+    X_pred = np.column_stack((x_grid.flatten(), y_grid.flatten(), u_grid.flatten(), v_grid.flatten(), hzt_grid_proc.flatten(), dayTimeSin_grid.flatten(), dayTimeCos_grid.flatten()))
     X_pred_scaled = scaler.transform(X_pred)
     
     # Select predictors
@@ -171,17 +256,48 @@ for lt in xrange(leadtime_hrs):
 
     # Reshape results
     y_pred_grid = np.reshape(y_pred, x_grid.shape)
-
+    
+    ## Disaggregation of HZT and GD fields ######################
+    # Disaggregate growth&decay (backward advection)
+    indicesHour = np.arange(int(lt*60/timestep_res_min), int((lt+1)*60/timestep_res_min)-1)
+    # y_pred_grid_disaggr[:,:,indicesHour] = nw.compute_advection(y_pred_grid, -U, -V, net=60/timestep_res_min-1)[:,:,::-1]/(60/timestep_res_min)
+    # y_pred_grid_disaggr[:,:,indicesHour[-1]+1] = y_pred_grid/(60/timestep_res_min)
+    
+    # Just copy the GD fields
+    y_pred_gridHour = np.repeat(y_pred_grid[:, :, np.newaxis]/(60/timestep_res_min), len(indicesHour), axis=2)
+    y_pred_grid_disaggr[:,:,indicesHour] = y_pred_gridHour
+    
+    # "Disaggregate" HZT fields (backward advection)
+    # hzt_grid_procHour = nw.compute_advection(hzt_grid_proc,-U,-V,net=60/timestep_res_min-1)[:,:,::-1]
+    
+    # Just copy the HZT fields within the hour
+    hzt_grid_procHour = np.repeat(hzt_grid_proc[:, :, np.newaxis], len(indicesHour), axis=2)
+    
+    x_pred_grid_hzt[:,:,indicesHour] = hzt_grid_procHour
+    
+    ## PLOTS ##
     plt.close()
-    plt.imshow(y_pred_grid,vmin=-2,vmax=2,interpolation='none',cmap=plt.get_cmap('coolwarm'))
-    plt.colorbar()
+    ax = plt.subplot(111)
+    im = ax.imshow(y_pred_grid, cmap=cmaps.cmapLog, norm=cmaps.normLog, interpolation='none')
+    gis.read_plot_shapefile(geo.fileNameShapefile, geo.proj4stringCH, geo.proj4stringCH, ax=ax, linewidth=0.75, alpha=0.5)
+    plt.colorbar(im, cmap=cmaps.cmapLog, ticks=cmaps.clevsLog, norm=cmaps.normLog, extend='both')
+    plt.title('Growth and decay at ' + str(validTime))
     plt.savefig('growthdecay-%i.png' % lt)
     
-    # Disaggregate growth&decay
-    y_pred_grid_disaggr[:,:,int(lt*60/timestep_res_min):int((lt+1)*60/timestep_res_min)] = nw.compute_advection(y_pred_grid,-U,-V,net=60/timestep_res_min)[:,:,::-1]/(60/timestep_res_min)
+    plt.close()
+    ax = plt.subplot(111)
+    im = ax.imshow(hzt_grid_proc, extent=extent_image, cmap=cmaps.cmapHZT, norm=cmaps.normHZT, interpolation='none')
+    gis.read_plot_shapefile(geo.fileNameShapefile, geo.proj4stringCH, geo.proj4stringCH, ax=ax, linewidth=0.75, alpha=0.5)
+    plt.colorbar(im, cmap=cmaps.cmapHZT, ticks=cmaps.clevsHZT, norm=cmaps.normHZT, extend='both')
+    plt.title('Freezing level height at ' + str(validTime))
+    plt.savefig('hzt-%i.png' % lt)
     
-#+++++++++++++++++++++++++++++++++++ Compute parameters for AR(2) process
+# Inflate the climatological growth and decay field
+y_pred_grid_disaggr*=gd_inflation_factor
 
+ti.toc('to compute the growth and decay field')
+#+++++++++++++++++++++++++++++++++++ Compute parameters for AR(2) process
+print('+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++')
 # (0 build hanning window
 window = ssft.build2dWindow((int(domain_size/upscale_km),int(domain_size/upscale_km)),'flat-hanning')
 
@@ -259,21 +375,37 @@ def ux(fieldin, upscale_km, resKm = 1, wavelet = 'haar'):
 ####### NOWCASTING #######################
 ##########################################
 
-
 #+++++++++++++++++++++++++++++++++++ Init the nowcast 
 
 hx = []
 
-f = Nowcasting(data, N, hx, fx, rx, phi, AR_order=AR_order, number_levels=number_levels, transformation=transformation, probability_matching=probability_matching, resolution_km=upscale_km, label='with growthdecay', min_rainrate=min_rainrate, zero_padding=zero_padding)
+f = Nowcasting(data, N, hx, fx, rx, phi, AR_order=AR_order, number_levels=number_levels, transformation=transformation, \
+probability_matching=probability_matching, resolution_km=upscale_km, label='with growthdecay', min_rainrate=min_rainrate, zero_padding=zero_padding)
 
-g = Nowcasting(data, N, hx, fx, rx, phi, AR_order=AR_order, number_levels=number_levels, transformation=transformation, probability_matching=probability_matching, resolution_km=upscale_km, label='without growthdecay', min_rainrate=min_rainrate, zero_padding=zero_padding)
+g = Nowcasting(data, N, hx, fx, rx, phi, AR_order=AR_order, number_levels=number_levels, transformation=transformation, \
+probability_matching=probability_matching, resolution_km=upscale_km, label='without growthdecay', min_rainrate=min_rainrate, zero_padding=zero_padding)
 
 #+++++++++++++++++++++++++++++++++++ Start nowcasting
 
+plotmembers = [-1,0]
 for t in xrange(nts):
 
     print('t = %i' % t)
-    plot_frames_paper(startStr,t,r0,data,f,g,min_rainrate)
+    
+    if t == 0:
+        figname, axes_stack = plot_frames_paper(startStr, t, r0, data, f, g, min_rainrate, plotmember=plotmembers, gd_field=y_pred_grid_disaggr[:,:,t])
+    else:
+        figname, axes_stack = plot_frames_paper(startStr, t, r0, data, f, g, min_rainrate, plotmember=plotmembers, gd_field=y_pred_grid_disaggr[:,:,t-1])
+    
+    xpos=0.02
+    ypos=0.02 
+    ax = axes_stack[-1]
+    ax.text(xpos, ypos+0.07, 'HZT min  = ' + fmt1 % (np.nanmin(x_pred_grid_hzt[:,:,t])/1000) + ' km', transform=ax.transAxes)
+    ax.text(xpos, ypos+0.035, 'HZT mean = ' + fmt1 % (np.nanmean(x_pred_grid_hzt[:,:,t])/1000) + ' km', transform=ax.transAxes)
+    ax.text(xpos, ypos, 'HZT max  = ' + fmt1 % (np.nanmax(x_pred_grid_hzt[:,:,t])/1000) + ' km', transform=ax.transAxes)
+    
+    plt.savefig(figname)
+    print('saved: ' + figname)
     
     #+++++++++++++++++++++++++++++++++++ Predict  --> t+1
     f.predict(growthdecay = y_pred_grid_disaggr[:,:,t]) 

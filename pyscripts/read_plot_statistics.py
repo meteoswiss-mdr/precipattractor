@@ -318,7 +318,7 @@ if plotHistScalingBreak:
     plt.savefig(fileName, dpi=300)
     sys.exit()
 
-####### PLOT SCALING BREAK VS ECCENTRICITY
+####### PLOT SCALING BREAK VS ECCENTRICITY/WAR
 ecc_idx = dictIdxSubset['eccentricity']
 war_idx = dictIdxSubset['war']
 rcmean_idx = dictIdxSubset['r_cmean']

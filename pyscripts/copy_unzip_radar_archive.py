@@ -101,7 +101,8 @@ while timeLocal <= timeEnd:
         # Extract additional hourly analyses
         period2014 = (timeLocal.year == 2014) & (timeLocal.month <= 9) # Starting in October there are no more pure hourly analyses
         period = (timeLocal.year >= 2005) & (timeLocal.year <= 2013) | period2014
-        if (product == 'HZT') & period:
+        
+        if (product == 'HZT') & ~period:
             cmd = 'unzip -q -o ' + outFile + ' "*.801"' + ' -d ' + outDir
             print(cmd)
             os.system(cmd)
@@ -109,7 +110,6 @@ while timeLocal <= timeEnd:
             print(cmd)
             os.system(cmd)
             # Change filenames for HZT fields analysis. 1500 -> 802 -> 1700 (analysis)
-            
             for hour in range(0,24,3):
                 hourStr_old = "%02i" % hour
                 hourStr_new1 = "%02i" % (hour+1)
